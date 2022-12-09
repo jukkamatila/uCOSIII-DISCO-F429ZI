@@ -22,6 +22,11 @@
 #define HUMAN_PLAYER_PRIO 3u
 #define ANALYSIS_PRIO 4u
 
+/* Debug logger */
+//typedef unsigned char LOG_MASK    //typedef not working
+#define LOG_TOUCH_SCREEN (uint8_t)0x1
+#define LOG_ALL (uint8_t)0xff
+#define LOG_EN 1u
 /*
 *********************************************************************************************************
 *                                           GLOBAL VARIABLES
@@ -61,6 +66,7 @@ static void DrawBoard(void *p_arg);
 static void BotPlayer(void *p_arg);
 static void HumanPlayer(void *p_arg);
 static void Analysis(void *p_arg);
+static void logger(const uint8_t mask);
 
 /* System Initilization Prototypes */
 static void SystemClock_Config(void);
@@ -318,7 +324,18 @@ static void HumanPlayer(void *p_arg)
         BSP_TS_GetState(&TS_State);
         BSP_LCD_SetTextColor(LCD_COLOR_RED);
 
-        if (board[0] == 0 && TS_State.TouchDetected && TS_State.X < 80 && TS_State.Y > 80 && TS_State.Y < 160)
+#if LOG_EN > 0
+    logger(LOG_TOUCH_SCREEN);
+#endif
+
+        //------------------------------------------------------------------
+        //! TS_State coordinates origin (0,0) is at the left BOTTOM corner
+        //! BSP_LCD_XXX() coordinates origin (0,0) is at the left TOP corner
+        //! The original auther had the Y coodrinates mis-calculated, 
+        //! (BSP_LCD_GetYSize() - TS_State.Y) is used to fix Y coordinates
+        //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+        //------------------------------------------------------------------
+        if (board[0] == 0 && TS_State.TouchDetected && TS_State.X < 80 && (BSP_LCD_GetYSize() - TS_State.Y) > 80 && (BSP_LCD_GetYSize() - TS_State.Y) < 160)
         {
             BSP_LCD_DrawLine(20, 100, 60, 140);
             BSP_LCD_DrawLine(60, 100, 20, 140);
@@ -328,7 +345,7 @@ static void HumanPlayer(void *p_arg)
                           (OS_OPT)OS_OPT_POST_NONE,
                           (OS_ERR *)&err);
         }
-        else if (board[1] == 0 && TS_State.TouchDetected && TS_State.X > 80 && TS_State.X < 160 && TS_State.Y > 80 && TS_State.Y < 160)
+        else if (board[1] == 0 && TS_State.TouchDetected && TS_State.X > 80 && TS_State.X < 160 && (BSP_LCD_GetYSize() - TS_State.Y) > 80 && (BSP_LCD_GetYSize() - TS_State.Y) < 160)
         {
             BSP_LCD_DrawLine(100, 100, 140, 140);
             BSP_LCD_DrawLine(140, 100, 100, 140);
@@ -338,7 +355,7 @@ static void HumanPlayer(void *p_arg)
                           (OS_OPT)OS_OPT_POST_NONE,
                           (OS_ERR *)&err);
         }
-        else if (board[2] == 0 && TS_State.TouchDetected && TS_State.X > 160 && TS_State.X < 240 && TS_State.Y > 80 && TS_State.Y < 160)
+        else if (board[2] == 0 && TS_State.TouchDetected && TS_State.X > 160 && TS_State.X < 240 && (BSP_LCD_GetYSize() - TS_State.Y) > 80 && (BSP_LCD_GetYSize() - TS_State.Y) < 160)
         {
             BSP_LCD_DrawLine(180, 100, 220, 140);
             BSP_LCD_DrawLine(220, 100, 180, 140);
@@ -348,7 +365,7 @@ static void HumanPlayer(void *p_arg)
                           (OS_OPT)OS_OPT_POST_NONE,
                           (OS_ERR *)&err);
         }
-        else if (board[3] == 0 && TS_State.TouchDetected && TS_State.X < 80 && TS_State.Y > 160 && TS_State.Y < 240)
+        else if (board[3] == 0 && TS_State.TouchDetected && TS_State.X < 80 && (BSP_LCD_GetYSize() - TS_State.Y) > 160 && (BSP_LCD_GetYSize() - TS_State.Y) < 240)
         {
             BSP_LCD_DrawLine(20, 180, 60, 220);
             BSP_LCD_DrawLine(60, 180, 20, 220);
@@ -358,7 +375,7 @@ static void HumanPlayer(void *p_arg)
                           (OS_OPT)OS_OPT_POST_NONE,
                           (OS_ERR *)&err);
         }
-        else if (board[4] == 0 && TS_State.TouchDetected && TS_State.X > 80 && TS_State.X < 160 && TS_State.Y > 160 && TS_State.Y < 240)
+        else if (board[4] == 0 && TS_State.TouchDetected && TS_State.X > 80 && TS_State.X < 160 && (BSP_LCD_GetYSize() - TS_State.Y) > 160 && (BSP_LCD_GetYSize() - TS_State.Y) < 240)
         {
             BSP_LCD_DrawLine(100, 180, 140, 220);
             BSP_LCD_DrawLine(140, 180, 100, 220);
@@ -368,7 +385,7 @@ static void HumanPlayer(void *p_arg)
                           (OS_OPT)OS_OPT_POST_NONE,
                           (OS_ERR *)&err);
         }
-        else if (board[5] == 0 && TS_State.TouchDetected && TS_State.X > 160 && TS_State.X < 240 && TS_State.Y > 160 && TS_State.Y < 240)
+        else if (board[5] == 0 && TS_State.TouchDetected && TS_State.X > 160 && TS_State.X < 240 && (BSP_LCD_GetYSize() - TS_State.Y) > 160 && (BSP_LCD_GetYSize() - TS_State.Y) < 240)
         {
             BSP_LCD_DrawLine(180, 180, 220, 220);
             BSP_LCD_DrawLine(220, 180, 180, 220);
@@ -378,7 +395,7 @@ static void HumanPlayer(void *p_arg)
                           (OS_OPT)OS_OPT_POST_NONE,
                           (OS_ERR *)&err);
         }
-        else if (board[6] == 0 && TS_State.TouchDetected && TS_State.X < 80 && TS_State.Y > 80 && TS_State.Y > 240 && TS_State.Y < 320)
+        else if (board[6] == 0 && TS_State.TouchDetected && TS_State.X < 80 && (BSP_LCD_GetYSize() - TS_State.Y) > 80 && (BSP_LCD_GetYSize() - TS_State.Y) > 240 && (BSP_LCD_GetYSize() - TS_State.Y) < BSP_LCD_GetYSize())
         {
             BSP_LCD_DrawLine(20, 260, 60, 300);
             BSP_LCD_DrawLine(60, 260, 20, 300);
@@ -388,7 +405,7 @@ static void HumanPlayer(void *p_arg)
                           (OS_OPT)OS_OPT_POST_NONE,
                           (OS_ERR *)&err);
         }
-        else if (board[7] == 0 && TS_State.TouchDetected && TS_State.X > 80 && TS_State.X < 160 && TS_State.Y > 240 && TS_State.Y < 320)
+        else if (board[7] == 0 && TS_State.TouchDetected && TS_State.X > 80 && TS_State.X < 160 && (BSP_LCD_GetYSize() - TS_State.Y) > 240 && (BSP_LCD_GetYSize() - TS_State.Y) < BSP_LCD_GetYSize())
         {
             BSP_LCD_DrawLine(100, 260, 140, 300);
             BSP_LCD_DrawLine(140, 260, 100, 300);
@@ -398,7 +415,7 @@ static void HumanPlayer(void *p_arg)
                           (OS_OPT)OS_OPT_POST_NONE,
                           (OS_ERR *)&err);
         }
-        else if (board[8] == 0 && TS_State.TouchDetected && TS_State.X > 160 && TS_State.X < 240 && TS_State.Y > 240 && TS_State.Y < 320)
+        else if (board[8] == 0 && TS_State.TouchDetected && TS_State.X > 160 && TS_State.X < 240 && (BSP_LCD_GetYSize() - TS_State.Y) > 240 && (BSP_LCD_GetYSize() - TS_State.Y) < BSP_LCD_GetYSize())
         {
             BSP_LCD_DrawLine(180, 260, 220, 300);
             BSP_LCD_DrawLine(220, 260, 180, 300);
@@ -511,6 +528,26 @@ static void Analysis(void *p_arg)
 *                                      NON-TASK FUNCTIONS
 *********************************************************************************************************
 */
+
+//----------------------------------------------------------
+//! A simple Debug logger for detected touch screen position
+//! \param [IN] mask - mask for desired log info 
+//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+//----------------------------------------------------------
+static void logger(const uint8_t mask)
+{
+    uint8_t log[64];
+    if (mask & LOG_TOUCH_SCREEN)
+    {
+        if (TS_State.TouchDetected)
+        {
+            sprintf((char *)log, "x:%u, y:%u, z:%u", TS_State.X, TS_State.Y, TS_State.Z);
+            BSP_LCD_SetTextColor(LCD_COLOR_GREEN);
+            BSP_LCD_SetFont(&Font16);
+            BSP_LCD_DisplayStringAt(0, 10, log, LEFT_MODE);
+        }
+    }
+}
 
 void HAL_Delay(uint32_t Delay)
 {
