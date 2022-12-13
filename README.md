@@ -17,7 +17,7 @@ Vaasa, 2022
 
 ## Step 0 - Non't follow the Instruction "ucos_boli_stm32_instruction.docx"!
 
-That instruction doesn't work anymore. Perhaps because it was made more than two years ago, there are changes in PlatformIO.
+That instruction doesn't work anymore. Perhaps because it was made more than three years ago, there are changes in PlatformIO.
 
 ## Step 1 - Install the tool-chain
 
