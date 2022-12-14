@@ -109,6 +109,7 @@ int main(void)
 
     OSInit(&err);
 
+    //mutex is actually not needed in this App at all. Because each Task run on their own turn by Task Control Block, there is no cocurrency. But I decided to leave the original code for case study 
     OSMutexCreate((OS_MUTEX *)&mutex,
                   (CPU_CHAR *)"Resource Mutex",
                   (OS_ERR *)&err);
