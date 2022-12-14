@@ -26,6 +26,7 @@
 // typedef unsigned char LOG_MASK    //typedef not working
 #define LOG_TOUCH_SCREEN (uint8_t)0x01
 #define LOG_BOARD_DATA_CORRUPT (uint8_t)0x02
+#define LOG_ERR_ANALYS (uint8_t)0x04
 #define LOG_CPU_STATUS (uint8_t)0x20
 #define LOG_TASK_COUNT (uint8_t)0x40
 #define LOG_CONTEXT_SWITCH (uint8_t)0x80
@@ -173,9 +174,6 @@ static void AppTaskStart(void *p_arg)
                      (OS_OPT)(OS_OPT_TASK_STK_CHK | OS_OPT_TASK_STK_CLR),
                      (OS_ERR *)&err);
 
-        OSTaskSemPost((OS_TCB *)&DrawBoardTCB, // Notify receive task to send next message
-                      (OS_OPT)OS_OPT_POST_NONE,
-                      (OS_ERR *)&err);
 
         OSTaskCreate((OS_TCB *)&BotPlayerTCB,
                      (CPU_CHAR *)"Bot Player Task",
@@ -218,6 +216,10 @@ static void AppTaskStart(void *p_arg)
                      (void *)0,
                      (OS_OPT)(OS_OPT_TASK_STK_CHK | OS_OPT_TASK_STK_CLR),
                      (OS_ERR *)&err);
+
+        OSTaskSemPost((OS_TCB *)&DrawBoardTCB, // Notify receive task to send next message
+                      (OS_OPT)OS_OPT_POST_NONE,
+                      (OS_ERR *)&err);
     }
 }
 
@@ -231,7 +233,6 @@ static void DrawBoard(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
-    uint8_t turn = 1;
 
     BSP_LCD_Clear(LCD_COLOR_BLACK);
     BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
@@ -243,36 +244,26 @@ static void DrawBoard(void *p_arg)
 
     while (DEF_TRUE)
     {
-        OSTaskSemPend((OS_TICK)0, // Wait for a notification to send next message
+        OSTaskSemPend((OS_TICK)0, // Wait for own turn
                       (OS_OPT)OS_OPT_PEND_BLOCKING,
                       (CPU_TS *)&ts,
                       (OS_ERR *)&err);
 
+        OSMutexPend((OS_MUTEX *)&mutex, // drawMark() is non-reentrance function access
+                    (OS_TICK)0,
+                    (OS_OPT)OS_OPT_PEND_BLOCKING,
+                    (CPU_TS *)&ts,
+                    (OS_ERR *)&err);
         drawMark();
-
-        switch (turn)
-        {
-        case 1:
-            OSTaskSemPost((OS_TCB *)&BotPlayerTCB,
-                          (OS_OPT)OS_OPT_POST_NONE,
-                          (OS_ERR *)&err);
-            break;
-        case 2:
-            OSTaskSemPost((OS_TCB *)&HumanPlayerTCB,
-                          (OS_OPT)OS_OPT_POST_NONE,
-                          (OS_ERR *)&err);
-        default:
-            break;
-        }
-        turn++;
-        if (turn >= 3)
-        {
-            turn = 1;
-        }
+        OSMutexPost((OS_MUTEX *)&mutex,
+                    (OS_OPT)OS_OPT_POST_NONE,
+                    (OS_ERR *)&err);
+        OSTaskSemPost((OS_TCB *)&AnalysisTCB,
+                      (OS_OPT)OS_OPT_POST_NONE,
+                      (OS_ERR *)&err);
     }
 }
 
-// TO-DO seperate the data operation from UI operation
 static void BotPlayer(void *p_arg)
 {
     OS_ERR err;
@@ -281,7 +272,7 @@ static void BotPlayer(void *p_arg)
 
     while (DEF_TRUE)
     {
-        OSTaskSemPend((OS_TICK)0, // Wait for a notification to send next message
+        OSTaskSemPend((OS_TICK)0, // Wait for own turn
                       (OS_OPT)OS_OPT_PEND_BLOCKING,
                       (CPU_TS *)&ts,
                       (OS_ERR *)&err);
@@ -301,48 +292,43 @@ static void BotPlayer(void *p_arg)
         {
             move = rand() % 9;
         }
-        /*
-                switch (move)
-                {
-                case 0:
-                    BSP_LCD_DrawCircle(40, 120, 20);
-                    break;
-                case 1:
-                    BSP_LCD_DrawCircle(120, 120, 20);
-                    break;
-                case 2:
-                    BSP_LCD_DrawCircle(200, 120, 20);
-                    break;
-                case 3:
-                    BSP_LCD_DrawCircle(40, 200, 20);
-                    break;
-                case 4:
-                    BSP_LCD_DrawCircle(120, 200, 20);
-                    break;
-                case 5:
-                    BSP_LCD_DrawCircle(200, 200, 20);
-                    break;
-                case 6:
-                    BSP_LCD_DrawCircle(40, 280, 20);
-                    break;
-                case 7:
-                    BSP_LCD_DrawCircle(120, 280, 20);
-                    break;
-                case 8:
-                    BSP_LCD_DrawCircle(200, 280, 20);
-                    break;
-                }
-        */
+
+        // Original implementation commented for case study.
+        // Better seperate the drawing from data operation
+        // Drawing Circle moved to DrawBoard() task
+        // switch (move)
+        // {
+        // case 0:
+        //     BSP_LCD_DrawCircle(40, 120, 20);
+        //     break;
+        // case 1:
+        //     BSP_LCD_DrawCircle(120, 120, 20);
+        //     break;
+        // case 2:
+        //     BSP_LCD_DrawCircle(200, 120, 20);
+        //     break;
+        // case 3:
+        //     BSP_LCD_DrawCircle(40, 200, 20);
+        //     break;
+        // case 4:
+        //     BSP_LCD_DrawCircle(120, 200, 20);
+        //     break;
+        // case 5:
+        //     BSP_LCD_DrawCircle(200, 200, 20);
+        //     break;
+        // case 6:
+        //     BSP_LCD_DrawCircle(40, 280, 20);
+        //     break;
+        // case 7:
+        //     BSP_LCD_DrawCircle(120, 280, 20);
+        //     break;
+        // case 8:
+        //     BSP_LCD_DrawCircle(200, 280, 20);
+        //     break;
+        // }
+
         board[move] = 1;
-
         moves++;
-
-        OSTimeDlyHMSM((CPU_INT16U)0,
-                      (CPU_INT16U)0,
-                      (CPU_INT16U)0,
-                      (CPU_INT32U)100u,
-                      (OS_OPT)OS_OPT_TIME_HMSM_STRICT,
-                      (OS_ERR *)&err);
 
         OSMutexPost((OS_MUTEX *)&mutex,
                     (OS_OPT)OS_OPT_POST_NONE,
@@ -350,6 +336,13 @@ static void BotPlayer(void *p_arg)
 
         OSTaskSemPost((OS_TCB *)&DrawBoardTCB,
                       (OS_OPT)OS_OPT_POST_NONE,
+                      (OS_ERR *)&err);
+
+        OSTimeDlyHMSM((CPU_INT16U)0,
+                      (CPU_INT16U)0,
+                      (CPU_INT16U)0,
+                      (CPU_INT32U)100u,
+                      (OS_OPT)OS_OPT_TIME_HMSM_STRICT,
                       (OS_ERR *)&err);
     }
 }
@@ -359,22 +352,53 @@ static void HumanPlayer(void *p_arg)
     OS_ERR err;
     CPU_TS ts;
     CPU_INT08S index;
+    CPU_INT08U input_state = 0;
 
     while (DEF_TRUE)
     {
+        OSTaskSemPend((OS_TICK)0, // Wait for own turn
+                      (OS_OPT)OS_OPT_PEND_BLOCKING,
+                      (CPU_TS *)&ts,
+                      (OS_ERR *)&err);
+
         OSMutexPend((OS_MUTEX *)&mutex,
                     (OS_TICK)0,
                     (OS_OPT)OS_OPT_PEND_BLOCKING,
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
-
-        BSP_TS_GetState(&TS_State);
         BSP_LCD_SetTextColor(LCD_COLOR_RED);
-
+        //------------------------------------------------------------------------------
+        //! new user input mapping algorithm
+        //! original: best case = 8 comparisms, worst scenario = 8 * 9 = 72 comparisms
+        //! new algorithm: best case = 4 comparisms, worst scenario = 6 comparisms
+        //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+        //------------------------------------------------------------------------------
+        while (input_state != 1)
+        {
+            BSP_TS_GetState(&TS_State);
+            index = touchInput();
 #if LOG_EN > 0
-        logger(LOG_TOUCH_SCREEN);
+            logger(LOG_TOUCH_SCREEN);
 #endif
+            if (index >= 0)
+            {
+                if (board[index] == 0)
+                {
+                    board[index] = 2;
+                    moves++;
+                    input_state = 1;
+                    OSMutexPost((OS_MUTEX *)&mutex,
+                                (OS_OPT)OS_OPT_POST_NONE,
+                                (OS_ERR *)&err);
+                    OSTaskSemPost((OS_TCB *)&DrawBoardTCB,
+                                  (OS_OPT)OS_OPT_POST_NONE,
+                                  (OS_ERR *)&err);
+                }
+            }
+        }
+        input_state = 0;
 
+        // Original implementation commented out for case study
         //------------------------------------------------------------------
         //! TS_State coordinates origin (0,0) is at the left BOTTOM corner
         //! BSP_LCD_XXX() coordinates origin (0,0) is at the left TOP corner
@@ -382,21 +406,6 @@ static void HumanPlayer(void *p_arg)
         //! (BSP_LCD_GetYSize() - TS_State.Y) is used to fix Y coordinates
         //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
         //------------------------------------------------------------------
-        // TO-DO new user input mapping algorithm
-        // original: best case = 8 comparisms, worst scenario = 8 * 9 = 72 comparisms
-        // new algorithm: best case = 4 comparisms, worst scenario = 6 comparisms
-        index = touchInput();
-        if (index >= 0)
-        {
-            if(board[index] == 0)
-            {
-                board[index] = 2;
-                moves++;
-            }
-            OSTaskSemPost((OS_TCB *)&DrawBoardTCB,
-                          (OS_OPT)OS_OPT_POST_NONE,
-                          (OS_ERR *)&err);
-        }
         // if (board[0] == 0 && TS_State.TouchDetected && TS_State.X < 80 && (BSP_LCD_GetYSize() - TS_State.Y) > 80 && (BSP_LCD_GetYSize() - TS_State.Y) < 160)
         // {
         //     BSP_LCD_DrawLine(20, 100, 60, 140);
@@ -494,21 +503,34 @@ static void HumanPlayer(void *p_arg)
                       (CPU_INT32U)100u,
                       (OS_OPT)OS_OPT_TIME_HMSM_STRICT,
                       (OS_ERR *)&err);
-
-        OSMutexPost((OS_MUTEX *)&mutex,
-                    (OS_OPT)OS_OPT_POST_NONE,
-                    (OS_ERR *)&err);
     }
 }
 
 static void Analysis(void *p_arg)
 {
     OS_ERR err;
+    CPU_TS ts;
+    uint8_t turn = 1;
+    uint8_t log[64];
+    CPU_INT08U check_row, check_column, check_diagnol_1, check_diagnol_2;
+    CPU_INT08U **myboard = (CPU_INT08U**)board;
 
     while (DEF_TRUE)
     {
-        // TO-DO new analys algorithm
-        //  currently 5 * 17 + 1 = 86 comparisms
+        OSTaskSemPend((OS_TICK)0, // Wait for a notification to send next message
+                      (OS_OPT)OS_OPT_PEND_BLOCKING,
+                      (CPU_TS *)&ts,
+                      (OS_ERR *)&err);
+
+        OSMutexPend((OS_MUTEX *)&mutex,
+                    (OS_TICK)0,
+                    (OS_OPT)OS_OPT_PEND_BLOCKING,
+                    (CPU_TS *)&ts,
+                    (OS_ERR *)&err);
+        // TO-DO new analysis algorithm
+        // original: best case = 5, worst case 5 * 17 + 1 = 86 comparisms
+
+        //Original implementation commented out for case study
         if (board[0] == 1 && board[1] == 1 && board[2] == 1)
         {
             PrintResult(1);
@@ -578,13 +600,42 @@ static void Analysis(void *p_arg)
             PrintResult(0);
         }
 
-        OSTimeDlyHMSM((CPU_INT16U)0,
-                      (CPU_INT16U)0,
-                      (CPU_INT16U)0,
-                      (CPU_INT32U)100u,
-                      (OS_OPT)OS_OPT_TIME_HMSM_STRICT,
-                      (OS_ERR *)&err);
+        OSMutexPost((OS_MUTEX *)&mutex,
+                    (OS_OPT)OS_OPT_POST_NONE,
+                    (OS_ERR *)&err);
+
+        sprintf((char *)log, "turn:%u", turn);
+        BSP_LCD_DisplayStringAt(0, 25, log, LEFT_MODE);
+        switch (turn)
+        {
+        case 1:
+            OSTaskSemPost((OS_TCB *)&BotPlayerTCB,
+                          (OS_OPT)OS_OPT_POST_NONE,
+                          (OS_ERR *)&err);
+            break;
+        case 2:
+            OSTaskSemPost((OS_TCB *)&HumanPlayerTCB,
+                          (OS_OPT)OS_OPT_POST_NONE,
+                          (OS_ERR *)&err);
+            break;
+        default:
+            logger(LOG_ERR_ANALYS);
+            break;
+        }
+
+        turn++;
+        if (turn >= 3)
+        {
+            turn = 1;
+        }
     }
+
+    OSTimeDlyHMSM((CPU_INT16U)0,
+                  (CPU_INT16U)0,
+                  (CPU_INT16U)0,
+                  (CPU_INT32U)100u,
+                  (OS_OPT)OS_OPT_TIME_HMSM_STRICT,
+                  (OS_ERR *)&err);
 }
 
 /*
@@ -592,23 +643,23 @@ static void Analysis(void *p_arg)
 *                                      NON-TASK FUNCTIONS
 *********************************************************************************************************
 */
-//----------------------------------------------------------
-//! Draw mark on the game board
+//------------------------------------------------------------------------
+//! Draw mark on the game board, reentrant function/thread safe
 //! \param [IN] x - x-coordinate of the cross center
 //! \param [IN] y - y-coordinate of the cross center
 //! \param [IN] size - half-width of the cross in pixels
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//----------------------------------------------------------
+//------------------------------------------------------------------------
 static void drawCross(const uint16_t x, const uint16_t y, const uint16_t size)
 {
     BSP_LCD_DrawLine(x - size, y - size, x + size, y + size); // '\' of the cross
     BSP_LCD_DrawLine(x + size, y - size, x - size, y + size); // '/' of the cross
 }
 
-//----------------------------------------------------------
-//! Draw mark on the game board
+//-------------------------------------------------------------------------
+//! Draw mark on the game board, non-reentrant function/not thread safe
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//----------------------------------------------------------
+//-------------------------------------------------------------------------
 static void drawMark()
 {
     for (uint8_t i = 0; i < BOARD_SIZE; i++)
@@ -708,10 +759,17 @@ static void logger(const uint8_t mask)
             BSP_LCD_DisplayStringAt(0, 10, log, LEFT_MODE);
         }
     }
+
     if (mask & LOG_BOARD_DATA_CORRUPT)
     {
         sprintf((char *)log, "Error! GameBoard data corruption!");
         BSP_LCD_DisplayStringAt(0, 15, log, LEFT_MODE);
+    }
+
+    if(mask & LOG_ERR_ANALYS)
+    {
+        sprintf((char *)log, "Error! Analysis turn data corruption!");
+        BSP_LCD_DisplayStringAt(0, 20, log, LEFT_MODE);
     }
     // TO-DO Extra logs
     //  if (mask & LOG_CPU_STATUS)
