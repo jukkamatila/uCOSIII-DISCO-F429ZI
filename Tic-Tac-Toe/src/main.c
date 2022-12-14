@@ -23,14 +23,27 @@
 #define ANALYSIS_PRIO 4u
 
 /* Debug logger */
-//typedef unsigned char LOG_MASK    //typedef not working
+// typedef unsigned char LOG_MASK    //typedef not working
 #define LOG_TOUCH_SCREEN (uint8_t)0x01
-#define LOG_CPU_STATUS (uint8_t)0x02
-#define LOG_TASK_COUNT (uint8_t)0x04
-#define LOG_CONTEXT_SWITCH (uint8_t)0x08
-#define LOG_OS_STATUS (uint8_t)0x0e
+#define LOG_BOARD_DATA_CORRUPT (uint8_t)0x02
+#define LOG_CPU_STATUS (uint8_t)0x20
+#define LOG_TASK_COUNT (uint8_t)0x40
+#define LOG_CONTEXT_SWITCH (uint8_t)0x80
+#define LOG_OS_STATUS (uint8_t)0xe0
 #define LOG_ALL (uint8_t)0xff
 #define LOG_EN 1u
+
+/* Board parameters */
+#define BOARD_SIZE 9
+#define CIRCLE_RADIUS (uint16_t)20
+#define CROSS_SIZE (uint16_t)20
+
+/* Data structures */
+typedef struct tuples
+{
+    uint16_t X;
+    uint16_t Y;
+} tuple;
 
 /*
 *********************************************************************************************************
@@ -54,9 +67,9 @@ static CPU_STK AnalysisStk[TASK_STK_SIZE];
 
 static TS_StateTypeDef TS_State;
 
-CPU_INT08U board[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0}; //0 is empty, 1 is bot player, 2 is human player
+CPU_INT08U board[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0}; // 0 is empty, 1 is bot player, 2 is human player
 CPU_INT08U moves = 0;
-
+tuple gridCenterCoordinates[9] = {{40, 280}, {120, 280}, {200, 280}, {40, 200}, {120, 200}, {200, 200}, {40, 120}, {120, 120}, {200, 120}};
 OS_MUTEX mutex;
 
 /*
@@ -71,14 +84,16 @@ static void DrawBoard(void *p_arg);
 static void BotPlayer(void *p_arg);
 static void HumanPlayer(void *p_arg);
 static void Analysis(void *p_arg);
-static void logger(const uint8_t mask);
-static const CPU_INT08S touchInput();
 
 /* System Initilization Prototypes */
 static void SystemClock_Config(void);
 static void LCD_Init(void);
 static void PrintResult(uint8_t who);
 static void GameOver(void);
+static void drawCross(const uint16_t x, const uint16_t y, const uint16_t size);
+static void drawMark();
+static void logger(const uint8_t mask);
+static const CPU_INT08S touchInput();
 
 /*
 *********************************************************************************************************
@@ -158,7 +173,7 @@ static void AppTaskStart(void *p_arg)
                      (OS_OPT)(OS_OPT_TASK_STK_CHK | OS_OPT_TASK_STK_CLR),
                      (OS_ERR *)&err);
 
-        OSTaskSemPost((OS_TCB *)&DrawBoardTCB, //Notify receive task to send next message
+        OSTaskSemPost((OS_TCB *)&DrawBoardTCB, // Notify receive task to send next message
                       (OS_OPT)OS_OPT_POST_NONE,
                       (OS_ERR *)&err);
 
@@ -216,28 +231,48 @@ static void DrawBoard(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
+    uint8_t turn = 1;
+
+    BSP_LCD_Clear(LCD_COLOR_BLACK);
+    BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
+    BSP_LCD_DrawHLine(0, BSP_LCD_GetYSize() - 240, 240);
+    BSP_LCD_DrawHLine(0, BSP_LCD_GetYSize() - 160, 240);
+    BSP_LCD_DrawHLine(0, BSP_LCD_GetYSize() - 80, 240);
+    BSP_LCD_DrawVLine(BSP_LCD_GetXSize() - 160, 80, 240);
+    BSP_LCD_DrawVLine(BSP_LCD_GetXSize() - 80, 80, 240);
 
     while (DEF_TRUE)
     {
-        OSTaskSemPend((OS_TICK)0, //Wait for a notification to send next message
+        OSTaskSemPend((OS_TICK)0, // Wait for a notification to send next message
                       (OS_OPT)OS_OPT_PEND_BLOCKING,
                       (CPU_TS *)&ts,
                       (OS_ERR *)&err);
 
-        BSP_LCD_Clear(LCD_COLOR_BLACK);
-        BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
-        BSP_LCD_DrawHLine(0, BSP_LCD_GetYSize() - 240, 240);
-        BSP_LCD_DrawHLine(0, BSP_LCD_GetYSize() - 160, 240);
-        BSP_LCD_DrawHLine(0, BSP_LCD_GetYSize() - 80, 240);
-        BSP_LCD_DrawVLine(BSP_LCD_GetXSize() - 160, 80, 240);
-        BSP_LCD_DrawVLine(BSP_LCD_GetXSize() - 80, 80, 240);
+        drawMark();
 
-        OSTaskSemPost((OS_TCB *)&BotPlayerTCB,
-                      (OS_OPT)OS_OPT_POST_NONE,
-                      (OS_ERR *)&err);
+        switch (turn)
+        {
+        case 1:
+            OSTaskSemPost((OS_TCB *)&BotPlayerTCB,
+                          (OS_OPT)OS_OPT_POST_NONE,
+                          (OS_ERR *)&err);
+            break;
+        case 2:
+            OSTaskSemPost((OS_TCB *)&HumanPlayerTCB,
+                          (OS_OPT)OS_OPT_POST_NONE,
+                          (OS_ERR *)&err);
+        default:
+            break;
+        }
+        turn++;
+        if (turn >= 3)
+        {
+            turn = 1;
+        }
     }
 }
 
+// TO-DO seperate the data operation from UI operation
 static void BotPlayer(void *p_arg)
 {
     OS_ERR err;
@@ -246,7 +281,7 @@ static void BotPlayer(void *p_arg)
 
     while (DEF_TRUE)
     {
-        OSTaskSemPend((OS_TICK)0, //Wait for a notification to send next message
+        OSTaskSemPend((OS_TICK)0, // Wait for a notification to send next message
                       (OS_OPT)OS_OPT_PEND_BLOCKING,
                       (CPU_TS *)&ts,
                       (OS_ERR *)&err);
@@ -266,37 +301,38 @@ static void BotPlayer(void *p_arg)
         {
             move = rand() % 9;
         }
-
-        switch (move)
-        {
-        case 0:
-            BSP_LCD_DrawCircle(40, 120, 20);
-            break;
-        case 1:
-            BSP_LCD_DrawCircle(120, 120, 20);
-            break;
-        case 2:
-            BSP_LCD_DrawCircle(200, 120, 20);
-            break;
-        case 3:
-            BSP_LCD_DrawCircle(40, 200, 20);
-            break;
-        case 4:
-            BSP_LCD_DrawCircle(120, 200, 20);
-            break;
-        case 5:
-            BSP_LCD_DrawCircle(200, 200, 20);
-            break;
-        case 6:
-            BSP_LCD_DrawCircle(40, 280, 20);
-            break;
-        case 7:
-            BSP_LCD_DrawCircle(120, 280, 20);
-            break;
-        case 8:
-            BSP_LCD_DrawCircle(200, 280, 20);
-            break;
-        }
+        /*
+                switch (move)
+                {
+                case 0:
+                    BSP_LCD_DrawCircle(40, 120, 20);
+                    break;
+                case 1:
+                    BSP_LCD_DrawCircle(120, 120, 20);
+                    break;
+                case 2:
+                    BSP_LCD_DrawCircle(200, 120, 20);
+                    break;
+                case 3:
+                    BSP_LCD_DrawCircle(40, 200, 20);
+                    break;
+                case 4:
+                    BSP_LCD_DrawCircle(120, 200, 20);
+                    break;
+                case 5:
+                    BSP_LCD_DrawCircle(200, 200, 20);
+                    break;
+                case 6:
+                    BSP_LCD_DrawCircle(40, 280, 20);
+                    break;
+                case 7:
+                    BSP_LCD_DrawCircle(120, 280, 20);
+                    break;
+                case 8:
+                    BSP_LCD_DrawCircle(200, 280, 20);
+                    break;
+                }
+        */
         board[move] = 1;
 
         moves++;
@@ -311,6 +347,10 @@ static void BotPlayer(void *p_arg)
         OSMutexPost((OS_MUTEX *)&mutex,
                     (OS_OPT)OS_OPT_POST_NONE,
                     (OS_ERR *)&err);
+
+        OSTaskSemPost((OS_TCB *)&DrawBoardTCB,
+                      (OS_OPT)OS_OPT_POST_NONE,
+                      (OS_ERR *)&err);
     }
 }
 
@@ -348,9 +388,12 @@ static void HumanPlayer(void *p_arg)
         index = touchInput();
         if (index >= 0)
         {
-            board[index] = board[index] == 0 ? 2 : 0;
-            moves++;
-            OSTaskSemPost((OS_TCB *)&BotPlayerTCB,
+            if(board[index] == 0)
+            {
+                board[index] = 2;
+                moves++;
+            }
+            OSTaskSemPost((OS_TCB *)&DrawBoardTCB,
                           (OS_OPT)OS_OPT_POST_NONE,
                           (OS_ERR *)&err);
         }
@@ -464,8 +507,8 @@ static void Analysis(void *p_arg)
 
     while (DEF_TRUE)
     {
-        //TO-DO new analys algorithm
-        // currently 5 * 17 + 1 = 86 comparisms
+        // TO-DO new analys algorithm
+        //  currently 5 * 17 + 1 = 86 comparisms
         if (board[0] == 1 && board[1] == 1 && board[2] == 1)
         {
             PrintResult(1);
@@ -550,6 +593,46 @@ static void Analysis(void *p_arg)
 *********************************************************************************************************
 */
 //----------------------------------------------------------
+//! Draw mark on the game board
+//! \param [IN] x - x-coordinate of the cross center
+//! \param [IN] y - y-coordinate of the cross center
+//! \param [IN] size - half-width of the cross in pixels
+//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+//----------------------------------------------------------
+static void drawCross(const uint16_t x, const uint16_t y, const uint16_t size)
+{
+    BSP_LCD_DrawLine(x - size, y - size, x + size, y + size); // '\' of the cross
+    BSP_LCD_DrawLine(x + size, y - size, x - size, y + size); // '/' of the cross
+}
+
+//----------------------------------------------------------
+//! Draw mark on the game board
+//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+//----------------------------------------------------------
+static void drawMark()
+{
+    for (uint8_t i = 0; i < BOARD_SIZE; i++)
+    {
+        switch (board[i])
+        {
+        case 0:
+            // Do Nothing
+            break;
+        case 1:
+            BSP_LCD_DrawCircle(gridCenterCoordinates[i].X, gridCenterCoordinates[i].Y, CIRCLE_RADIUS);
+            break;
+        case 2:
+            drawCross(gridCenterCoordinates[i].X, gridCenterCoordinates[i].Y, CROSS_SIZE);
+            break;
+        default:
+            logger(LOG_BOARD_DATA_CORRUPT);
+            // TO-DO throuw some kind of exception
+            break;
+        }
+    }
+}
+
+//----------------------------------------------------------
 //! Converts user touch input to index for the board
 //! \return [OUT] touch2Index 0 - 9 if valid, -1 if invalid
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
@@ -609,25 +692,30 @@ static const CPU_INT08S touchInput()
 }
 //----------------------------------------------------------
 //! A simple Debug logger for detected touch screen position
-//! \param [IN] mask - mask for desired log info 
+//! \param [IN] mask - mask for desired log info
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
 //----------------------------------------------------------
 static void logger(const uint8_t mask)
 {
+    BSP_LCD_SetTextColor(LCD_COLOR_GREEN);
+    BSP_LCD_SetFont(&Font16);
     uint8_t log[64];
     if (mask & LOG_TOUCH_SCREEN)
     {
         if (TS_State.TouchDetected)
         {
             sprintf((char *)log, "x:%u, y:%u, z:%u", TS_State.X, TS_State.Y, TS_State.Z);
-            BSP_LCD_SetTextColor(LCD_COLOR_GREEN);
-            BSP_LCD_SetFont(&Font16);
             BSP_LCD_DisplayStringAt(0, 10, log, LEFT_MODE);
         }
     }
-    //TO-DO Extra logs
-    // if (mask & LOG_CPU_STATUS)
-    // {
+    if (mask & LOG_BOARD_DATA_CORRUPT)
+    {
+        sprintf((char *)log, "Error! GameBoard data corruption!");
+        BSP_LCD_DisplayStringAt(0, 15, log, LEFT_MODE);
+    }
+    // TO-DO Extra logs
+    //  if (mask & LOG_CPU_STATUS)
+    //  {
 
     // }
     // if (mask & LOG_TASK_COUNT)
@@ -711,12 +799,12 @@ static void SystemClock_Config(void)
     RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
     RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
 
-    /** Configure the main internal regulator output voltage 
-  */
+    /** Configure the main internal regulator output voltage
+     */
     __HAL_RCC_PWR_CLK_ENABLE();
     __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
-    /** Initializes the CPU, AHB and APB busses clocks 
-  */
+    /** Initializes the CPU, AHB and APB busses clocks
+     */
     RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
     RCC_OscInitStruct.HSIState = RCC_HSI_ON;
     RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
@@ -728,12 +816,12 @@ static void SystemClock_Config(void)
     RCC_OscInitStruct.PLL.PLLQ = 7;
     HAL_RCC_OscConfig(&RCC_OscInitStruct);
 
-    /** Activate the Over-Drive mode 
-  */
+    /** Activate the Over-Drive mode
+     */
     HAL_PWREx_EnableOverDrive();
 
-    /** Initializes the CPU, AHB and APB busses clocks 
-  */
+    /** Initializes the CPU, AHB and APB busses clocks
+     */
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
     RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
