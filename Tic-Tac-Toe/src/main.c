@@ -35,7 +35,8 @@
 #define LOG_EN 1u
 
 /* Board parameters */
-#define BOARD_SIZE 9
+#define BOARD_SIDE_SIZE 3
+#define BOARD_SIZE BOARD_SIDE_SIZE * BOARD_SIDE_SIZE
 #define CIRCLE_RADIUS (uint16_t)20
 #define CROSS_SIZE (uint16_t)20
 
@@ -511,9 +512,7 @@ static void Analysis(void *p_arg)
     OS_ERR err;
     CPU_TS ts;
     uint8_t turn = 1;
-    uint8_t log[64];
     CPU_INT08U check_row, check_column, check_diagnol_1, check_diagnol_2;
-    CPU_INT08U **myboard = (CPU_INT08U**)board;
 
     while (DEF_TRUE)
     {
@@ -527,85 +526,178 @@ static void Analysis(void *p_arg)
                     (OS_OPT)OS_OPT_PEND_BLOCKING,
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
-        // TO-DO new analysis algorithm
-        // original: best case = 5, worst case 5 * 17 + 1 = 86 comparisms
 
-        //Original implementation commented out for case study
-        if (board[0] == 1 && board[1] == 1 && board[2] == 1)
+        //------------------------------------------------------------------------------
+        //! New game analysis implementation for easy scaling and maybe more efficient 
+        //! original cost:
+        //! best case = 5 comparisms
+        //! worst case 5 * 17 + 1 = 86 comparisms
+        //! new cost:
+        //! best case = 3 bitwise & plus 1 comparism
+        //! worst case 3 x 8 = 24 bitwise & plus 2 x 8 + 1 = 17 comparisms
+        //! However, if it's only 3x3 grid, it doesn't matter so much. New implementation
+        //! is much better at scaling up!
+        //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+        //------------------------------------------------------------------------------
+
+        // check the rows
+        for (uint8_t r = 0; r < BOARD_SIDE_SIZE; r++)
         {
+            check_row = 0xff;
+            for (uint8_t c = 0; c < BOARD_SIDE_SIZE; c++)
+            {
+                check_row &= board[r * BOARD_SIDE_SIZE + c]; // bitwise AND the whole row, for a result
+            }
+            switch (check_row)
+            { // value 1 or 2 would give a result, otherwise continue
+            case 1:
+                PrintResult(1);
+                break;
+            case 2:
+                PrintResult(2);
+                break;
+            default:
+                break;
+            }
+        }
+
+        // check the columns, logic is the same as row checking, but columns instead
+        for (uint8_t c = 0; c < BOARD_SIDE_SIZE; c++)
+        {
+            check_column = 0xff;
+            for (uint8_t r = 0; r < BOARD_SIDE_SIZE; r++)
+            {
+                check_column &= board[r * BOARD_SIDE_SIZE + c];
+            }
+            switch (check_column)
+            {
+            case 1:
+                PrintResult(1);
+                break;
+            case 2:
+                PrintResult(2);
+                break;
+            default:
+                break;
+            }
+        }
+
+        // check the diagnol, logic is the same as row checking, but diagnols instead
+        check_diagnol_1 = 0xff;
+        check_diagnol_2 = 0xff;
+
+        for (uint8_t r = 0, c1, c2; r < BOARD_SIDE_SIZE; r++)
+        {
+            c1 = r;
+            c2 = BOARD_SIDE_SIZE - r;
+            check_diagnol_1 &= board[r * BOARD_SIDE_SIZE + c1];
+            check_diagnol_2 &= board[r * BOARD_SIDE_SIZE + c2];
+        }
+
+        switch (check_diagnol_1)
+        {
+        case 1:
             PrintResult(1);
+            break;
+        case 2:
+            PrintResult(2);
+            break;
+        default:
+            break;
         }
-        else if (board[3] == 1 && board[4] == 1 && board[5] == 1)
+
+        switch (check_diagnol_2)
         {
+        case 1:
             PrintResult(1);
-        }
-        else if (board[6] == 1 && board[7] == 1 && board[8] == 1)
-        {
-            PrintResult(1);
-        }
-        else if (board[0] == 1 && board[3] == 1 && board[6] == 1)
-        {
-            PrintResult(1);
-        }
-        else if (board[1] == 1 && board[4] == 1 && board[7] == 1)
-        {
-            PrintResult(1);
-        }
-        else if (board[2] == 1 && board[5] == 1 && board[8] == 1)
-        {
-            PrintResult(1);
-        }
-        else if (board[0] == 1 && board[4] == 1 && board[8] == 1)
-        {
-            PrintResult(1);
-        }
-        else if (board[2] == 1 && board[4] == 1 && board[6] == 1)
-        {
-            PrintResult(1);
-        }
-        else if (board[0] == 2 && board[1] == 2 && board[2] == 2)
-        {
+            break;
+        case 2:
             PrintResult(2);
+            break;
+        default:
+            break;
         }
-        else if (board[3] == 2 && board[4] == 2 && board[5] == 2)
-        {
-            PrintResult(2);
-        }
-        else if (board[6] == 2 && board[7] == 2 && board[8] == 2)
-        {
-            PrintResult(2);
-        }
-        else if (board[0] == 2 && board[3] == 2 && board[6] == 2)
-        {
-            PrintResult(2);
-        }
-        else if (board[1] == 2 && board[4] == 2 && board[7] == 2)
-        {
-            PrintResult(2);
-        }
-        else if (board[2] == 2 && board[5] == 2 && board[8] == 2)
-        {
-            PrintResult(2);
-        }
-        else if (board[0] == 2 && board[4] == 2 && board[8] == 2)
-        {
-            PrintResult(2);
-        }
-        else if (board[2] == 2 && board[4] == 2 && board[6] == 2)
-        {
-            PrintResult(2);
-        }
-        else if (moves == 9)
+
+        // Finally, check the total moves
+        if (moves >= 9)
         {
             PrintResult(0);
         }
+
+        // Original implementation commented out for case study
+        // if (board[0] == 1 && board[1] == 1 && board[2] == 1)
+        // {
+        //     PrintResult(1);
+        // }
+        // else if (board[3] == 1 && board[4] == 1 && board[5] == 1)
+        // {
+        //     PrintResult(1);
+        // }
+        // else if (board[6] == 1 && board[7] == 1 && board[8] == 1)
+        // {
+        //     PrintResult(1);
+        // }
+        // else if (board[0] == 1 && board[3] == 1 && board[6] == 1)
+        // {
+        //     PrintResult(1);
+        // }
+        // else if (board[1] == 1 && board[4] == 1 && board[7] == 1)
+        // {
+        //     PrintResult(1);
+        // }
+        // else if (board[2] == 1 && board[5] == 1 && board[8] == 1)
+        // {
+        //     PrintResult(1);
+        // }
+        // else if (board[0] == 1 && board[4] == 1 && board[8] == 1)
+        // {
+        //     PrintResult(1);
+        // }
+        // else if (board[2] == 1 && board[4] == 1 && board[6] == 1)
+        // {
+        //     PrintResult(1);
+        // }
+        // else if (board[0] == 2 && board[1] == 2 && board[2] == 2)
+        // {
+        //     PrintResult(2);
+        // }
+        // else if (board[3] == 2 && board[4] == 2 && board[5] == 2)
+        // {
+        //     PrintResult(2);
+        // }
+        // else if (board[6] == 2 && board[7] == 2 && board[8] == 2)
+        // {
+        //     PrintResult(2);
+        // }
+        // else if (board[0] == 2 && board[3] == 2 && board[6] == 2)
+        // {
+        //     PrintResult(2);
+        // }
+        // else if (board[1] == 2 && board[4] == 2 && board[7] == 2)
+        // {
+        //     PrintResult(2);
+        // }
+        // else if (board[2] == 2 && board[5] == 2 && board[8] == 2)
+        // {
+        //     PrintResult(2);
+        // }
+        // else if (board[0] == 2 && board[4] == 2 && board[8] == 2)
+        // {
+        //     PrintResult(2);
+        // }
+        // else if (board[2] == 2 && board[4] == 2 && board[6] == 2)
+        // {
+        //     PrintResult(2);
+        // }
+        // else if (moves == 9)
+        // {
+        //     PrintResult(0);
+        // }
 
         OSMutexPost((OS_MUTEX *)&mutex,
                     (OS_OPT)OS_OPT_POST_NONE,
                     (OS_ERR *)&err);
 
-        sprintf((char *)log, "turn:%u", turn);
-        BSP_LCD_DisplayStringAt(0, 25, log, LEFT_MODE);
         switch (turn)
         {
         case 1:
