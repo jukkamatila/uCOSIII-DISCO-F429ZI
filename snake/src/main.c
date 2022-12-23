@@ -63,29 +63,43 @@ typedef struct game_data
 } gamedata_t;
 
 /* Game Parameters */
-#define SCALE (CPU_INT16S)10
+#define SCALE (CPU_INT16S)10 // Map the actual pixel to a square of the grid
 #define HALF_SCALE (CPU_INT16S)5
-#define UP (CPU_INT16S)1
-#define DOWN (CPU_INT16S) - 1
-#define LEFT (CPU_INT16S)1
-#define RIGHT (CPU_INT16S) - 1
+#define DIR_LEFT \
+    (tuple)      \
+    {            \
+        0, 1     \
+    }
+#define DIR_RIGHT \
+    (tuple)       \
+    {             \
+        0, -1     \
+    }
+#define DIR_DOWN \
+    (tuple)      \
+    {            \
+        1, 0     \
+    }
+#define DIR_UP \
+    (tuple)    \
+    {          \
+        -1, 0  \
+    }
 #define ZERO (CPU_INT16S)0
 #define SNAKE_START_SPEED (CPU_INT16S)1
-#define SNAKE_START_DIRECTION \
-    (tuple)                   \
-    {                         \
-        ZERO, RIGHT           \
-    }
+#define SNAKE_START_DIRECTION DIR_LEFT
+#define SNAKE_X_OFFSET 0 - HALF_SCALE // OFFSET for centering the each squre of the grid
+#define SNAKE_Y_OFFSET HALF_SCALE
 #define SNAKE_START_COORDINATES \
     (tuple)                     \
     {                           \
-        0,320                \
+        115, 115                \
     }
 
 #define APPLE_START_COORDINATES \
     (tuple)                     \
     {                           \
-        5, 315                \
+        5, 5                    \
     }
 
 /*
@@ -142,6 +156,7 @@ static void SnakeCoordinatesUpdate(snake_head_node *const snake_head);
 static const CPU_BOOLEAN TryEatApple(const snake_head_node *const snake_head, const tuple *const apple);
 static void GameOver(void);
 static void logger(const uint8_t mask);
+static const CPU_BOOLEAN TupleComp(const tuple *const tuple1, const tuple *const tuple2);
 
 /*
 *********************************************************************************************************
@@ -284,10 +299,6 @@ static void AppTaskStart(void *p_arg)
                      (void *)0,
                      (OS_OPT)(OS_OPT_TASK_STK_CHK | OS_OPT_TASK_STK_CLR),
                      (OS_ERR *)&err);
-
-        // OSTaskSemPost((OS_TCB *)&DrawBoardTCB, // Notify receive task to send next message
-        //               (OS_OPT)OS_OPT_POST_NONE,
-        //               (OS_ERR *)&err);
     }
 }
 
@@ -296,33 +307,69 @@ static void AppTaskStart(void *p_arg)
 *                                                  TASKS
 *********************************************************************************************************
 */
-//----------------------------------------------------------
-//! Converts user touch input to UP, DOWN, LEFT, RIGHT
-//! \param [IN] p_arg - cast to gamedata_t* before use
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//----------------------------------------------------------
+
+/**
+ * @brief Converts user touch input to UP, DOWN, LEFT, RIGHT
+ * @param [IN] p_arg - cast to gamedata_t* before use
+ * @author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
 static void TouchInput(void *p_arg)
 {
     OS_ERR err;
-
+    CPU_TS ts;
+    snake_head_node *snake_head = ((gamedata_t *)p_arg)->snake_head;
     while (DEF_TRUE)
     {
+        BSP_TS_GetState(&TS_State);
+        // logger(LOG_TOUCH_SCREEN);
+
         if (TS_State.TouchDetected)
         {
-            // UP
-            // DOWN
-            // LEFT
-            // RIGHT
+            OSMutexPend((OS_MUTEX *)&mutex_snake,
+                        (OS_TICK)0,
+                        (OS_OPT)OS_OPT_PEND_BLOCKING,
+                        (CPU_TS *)&ts,
+                        (OS_ERR *)&err);
+
+            if (TS_State.Y < 75)
+            {
+                if (TupleComp(&(snake_head->direction), &DIR_UP) || TupleComp(&(snake_head->direction), &DIR_DOWN))     // can turn LEFT only if current direction is UP or DOWN
+                    snake_head->direction = DIR_LEFT;
+            }
+            else if (TS_State.Y < 225)
+            {
+                if ((TupleComp(&(snake_head->direction), &DIR_LEFT) || TupleComp(&(snake_head->direction), &DIR_RIGHT)))    // can turn UP/DOWN only if current direction is LEFT or RIGHT
+                {
+                    if (TS_State.X < 120)
+                    {
+
+                        snake_head->direction = DIR_UP;
+                    }
+                    else
+                    {
+                        snake_head->direction = DIR_DOWN;
+                    }
+                }
+            }
+            else if (TS_State.Y >= 225)
+            {
+                if ((TupleComp(&(snake_head->direction), &DIR_UP) || TupleComp(&(snake_head->direction), &DIR_DOWN)))       // can turn RIGHT only if current direction is UP or DOWN
+                    snake_head->direction = DIR_RIGHT;
+            }
+
+            OSMutexPost((OS_MUTEX *)&mutex_snake,
+                        (OS_OPT)OS_OPT_POST_NONE,
+                        (OS_ERR *)&err);
         }
         OSTimeDly(1, OS_OPT_TIME_DLY, &err);
     }
 }
 
-//---------------------------------------------------
-//! Update the status of the snake and the apple
-//! \param [IN] p_arg - cast to gamedata_t* before use
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//---------------------------------------------------
+/**
+ * \brief Update the status of the snake and the apple
+ * \param [IN] p_arg - cast to gamedata_t* before use
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
 static void GameRun(void *p_arg)
 {
     OS_ERR err;
@@ -370,11 +417,11 @@ static void GameRun(void *p_arg)
     }
 }
 
-//---------------------------------------------------
-//! Draw snake to the LCD Screen
+/*---------------------------------------------------*/
+//! \brief Draw snake to the LCD Screen
 //! \param [IN] p_arg - cast to gamedata_t* before use
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//---------------------------------------------------
+/*---------------------------------------------------*/
 static void DrawSnake(void *p_arg)
 {
     OS_ERR err;
@@ -393,10 +440,10 @@ static void DrawSnake(void *p_arg)
                     (OS_ERR *)&err);
 
         snake_body = snake_head->next_node;
-        BSP_LCD_FillRect(snake_head->coordinates.X, snake_head->coordinates.Y, SCALE, SCALE);
+        BSP_LCD_FillRect(snake_head->coordinates.X + SNAKE_X_OFFSET, snake_head->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
         while (snake_body != NULL)
         {
-            BSP_LCD_DrawRect(snake_body->coordinates.X, snake_body->coordinates.Y, SCALE, SCALE);
+            BSP_LCD_DrawRect(snake_body->coordinates.X + SNAKE_X_OFFSET, snake_body->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
             snake_body = snake_body->next_node;
         }
 
@@ -407,18 +454,18 @@ static void DrawSnake(void *p_arg)
         OSTimeDlyHMSM(
             (CPU_INT16U)0,
             (CPU_INT16U)0,
-            (CPU_INT16U)1,
             (CPU_INT16U)0,
+            (CPU_INT16U)20,
             OS_OPT_TIME_DLY,
             &err);
     }
 }
 
-//---------------------------------------------------
-//! Draw apple to the LCD Screen
+/*---------------------------------------------------*/
+//! \brief Draw apple to the LCD Screen
 //! \param [IN] p_arg - cast to gamedata_t* before use
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//---------------------------------------------------
+/*---------------------------------------------------*/
 static void DrawApple(void *p_arg)
 {
     OS_ERR err;
@@ -461,11 +508,11 @@ static void DrawApple(void *p_arg)
     }
 }
 
-//---------------------------------------------------
-//! Check if snake's head hit it's body
+/*---------------------------------------------------*/
+//! \brief Check if snake's head hit it's body
 //! \param [IN] p_arg - cast to gamedata_t* before use
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//---------------------------------------------------
+/*---------------------------------------------------*/
 static void Analysis(void *p_arg)
 {
     OS_ERR err;
@@ -499,25 +546,25 @@ static void Analysis(void *p_arg)
 *                                      NON-TASK FUNCTIONS
 *********************************************************************************************************
 */
-//-------------------------------------------------------------------
+/*-------------------------------------------------------------------*/
 //! Update the coordinates of the snake, nonreentrant/not thread safe
 //! \param [IN] snake_head_node
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//--------------------------------------------------------------------
+/*------------------------------------------------------------------*/
 static void SnakeCoordinatesUpdate(snake_head_node *const snake_head)
 {
     tuple temp_coordinates = snake_head->coordinates;
     snake_body_node *snake_body = snake_head->next_node;
 
     snake_head->coordinates.X += snake_head->speed * SCALE * snake_head->direction.X;
-    if (snake_head->coordinates.X > 235)
-        snake_head->coordinates.X = 0;
+    if (snake_head->coordinates.X > 240)
+        snake_head->coordinates.X = 5;
     if (snake_head->coordinates.X < 0)
         snake_head->coordinates.X = 235;
 
     snake_head->coordinates.Y += snake_head->speed * SCALE * snake_head->direction.Y;
-    if (snake_head->coordinates.Y > 315)
-        snake_head->coordinates.Y = 0;
+    if (snake_head->coordinates.Y > 320)
+        snake_head->coordinates.Y = 5;
     if (snake_head->coordinates.Y < 0)
         snake_head->coordinates.Y = 315;
 
@@ -542,23 +589,42 @@ static void SnakeCoordinatesUpdate(snake_head_node *const snake_head)
     // }
 }
 
-//-------------------------------------------------------------------
+/*---------------------------------------------------------------*/
 //! Check if snake eats the apple, nonreentrant/not thread safe
 //! \param [IN] snake_head_node
 //! \param [IN] apple
 //! \return TRUE or FALSE
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//--------------------------------------------------------------------
+/*---------------------------------------------------------------*/
 static const CPU_BOOLEAN TryEatApple(const snake_head_node *const snake_head, const tuple *const apple)
 {
     return OS_TRUE;
 }
 
-//----------------------------------------------------------
+/**
+ * \brief Compare two tuples
+ * \param [IN] tuple1
+ * \param [IN] tuple2
+ * \return Return 1 if the same, 0 if not
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
+static const CPU_BOOLEAN TupleComp(const tuple *const tuple1, const tuple *const tuple2)
+{
+    if (tuple1->X == tuple2->X && tuple1->Y == tuple2->Y)
+    {
+        return (CPU_BOOLEAN)1u;
+    }
+    else
+    {
+        return (CPU_BOOLEAN)0u;
+    }
+}
+
+/*----------------------------------------------------------*/
 //! A simple Debug logger for detected touch screen position
 //! \param [IN] mask - mask for desired log info
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//----------------------------------------------------------
+/*----------------------------------------------------------*/
 static void logger(const uint8_t mask)
 {
     BSP_LCD_SetTextColor(LCD_COLOR_GREEN);
@@ -607,11 +673,11 @@ void HAL_Delay(uint32_t Delay)
               (OS_ERR *)&err);
 }
 
-//----------------------------------------------------
+/*--------------------------------------------------*/
 //! Print game result
 //! \param [IN] result
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//----------------------------------------------------
+/*--------------------------------------------------*/
 static void PrintResult(uint8_t result)
 {
     BSP_LCD_SetTextColor(LCD_COLOR_RED);
@@ -633,10 +699,10 @@ static void PrintResult(uint8_t result)
     GameOver();
 }
 
-//----------------------------------------------------
+/*--------------------------------------------------*/
 //! Delete the tasks and end the game
 //! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-//----------------------------------------------------
+/*--------------------------------------------------*/
 static void GameOver(void)
 {
     OS_ERR err;
