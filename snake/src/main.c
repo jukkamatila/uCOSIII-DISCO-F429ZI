@@ -590,36 +590,35 @@ static void AppleInit(apple_t *apple)
  */
 static void SnakeCoordinatesUpdate(snake_t *const snake)
 {
+    snake_body_node_t *snake_node = snake->tail;
 
-    snake_body_node_t *snake_node = snake->head;
-    tuple_t temp_coordinates = snake->head->coordinates;
+    // Update the coordinates from the tail to head->next
+    while(snake_node != snake->head)
+    {
+        snake_node->coordinates = snake_node->previous_node->coordinates;
+        snake_node = snake_node->previous_node;
+    }
 
+    // Update the head
     snake->head->coordinates.X += snake->speed * SCALE * snake->direction.X;
     if (snake->head->coordinates.X > 240)
+    {
         snake->head->coordinates.X = 5;
+    }
     if (snake->head->coordinates.X < 0)
+    {
         snake->head->coordinates.X = 235;
+    }
 
     snake->head->coordinates.Y += snake->speed * SCALE * snake->direction.Y;
     if (snake->head->coordinates.Y > 320)
+    {
         snake->head->coordinates.Y = 5;
+    }
     if (snake->head->coordinates.Y < 0)
+    {
         snake->head->coordinates.Y = 315;
-
-    // TBD - Snake body coordinates update
-
-    // if (snake_body)
-    // {
-
-    //     snake_body->coordinates = snake_head->coordinates;
-    //     snake_body = snake_body->next_node;
-    //     while (snake_body)
-    //     {
-    //         snake_body->coordinates = temp_coordinates;
-
-    //         snake_body = snake_body->next_node;
-    //     }
-    // }
+    }
 }
 
 /**
