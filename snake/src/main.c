@@ -40,64 +40,75 @@ typedef struct tuples
 {
     CPU_INT16S X;
     CPU_INT16S Y;
-} tuple;
+} tuple_t;
+
+typedef struct apples
+{
+    tuple_t coordinates;
+    uint32_t colour; // red apple is poisionours, green is safe
+} apple_t;
 
 typedef struct snake_body_nodes
 {
-    tuple coordinates;
+    tuple_t coordinates;
+    uint32_t colour;
+    struct snake_body_nodes *previous_node;
     struct snake_body_nodes *next_node;
-} snake_body_node;
+} snake_body_node_t;
 
-typedef struct snake_head_nodes
+typedef struct snakes
 {
+    CPU_INT16U length;
     CPU_INT16S speed;
-    tuple direction;
-    tuple coordinates;
-    struct snake_body_nodes *next_node;
-} snake_head_node;
+    tuple_t direction;
+    snake_body_node_t *head;
+    snake_body_node_t *tail;
+} snake_t;
 
 typedef struct game_data
 {
-    snake_head_node *snake_head;
-    tuple *apple;
+    snake_t *snake;
+    apple_t *apple;
 } gamedata_t;
 
 /* Game Parameters */
 #define SCALE (CPU_INT16S)10 // Map the actual pixel to a square of the grid
 #define HALF_SCALE (CPU_INT16S)5
 #define DIR_LEFT \
-    (tuple)      \
+    (tuple_t)    \
     {            \
         0, 1     \
     }
 #define DIR_RIGHT \
-    (tuple)       \
+    (tuple_t)     \
     {             \
         0, -1     \
     }
 #define DIR_DOWN \
-    (tuple)      \
+    (tuple_t)    \
     {            \
         1, 0     \
     }
 #define DIR_UP \
-    (tuple)    \
+    (tuple_t)  \
     {          \
         -1, 0  \
     }
 #define ZERO (CPU_INT16S)0
 #define SNAKE_START_SPEED (CPU_INT16S)1
+#define SNAKE_START_LENGTH (CPU_INT16U)0
+#define SNAKE_HEAD_COLOUR LCD_COLOR_GREEN
 #define SNAKE_START_DIRECTION DIR_LEFT
 #define SNAKE_X_OFFSET 0 - HALF_SCALE // OFFSET for centering the each squre of the grid
 #define SNAKE_Y_OFFSET HALF_SCALE
 #define SNAKE_START_COORDINATES \
-    (tuple)                     \
+    (tuple_t)                   \
     {                           \
         115, 115                \
     }
 
 #define APPLE_START_COORDINATES \
-    (tuple)                     \
+    (tuple_t)                   \
     {                           \
         5, 5                    \
     }
@@ -148,15 +159,15 @@ static void SystemClock_Config(void);
 static void LCD_Init(void);
 
 /* Game Functions */
-static void Snake_Init(snake_head_node *const snake_head);
-static void AddSnakeBody(snake_head_node *const snake_head);
-static void DestroySnake(snake_head_node *const snake_head);
-static void AppleCoordinatesUpdate(tuple *const apple);
-static void SnakeCoordinatesUpdate(snake_head_node *const snake_head);
-static const CPU_BOOLEAN TryEatApple(const snake_head_node *const snake_head, const tuple *const apple);
+static void Snake_Init(snake_t *const snake);
+static void AddSnakeBody(snake_t *const snake);
+static void DestroySnake(snake_t *const snake);
+static void AppleCoordinatesUpdate(apple_t *const apple);
+static void SnakeCoordinatesUpdate(snake_t *const snake);
+static const CPU_BOOLEAN TryEatApple(snake_t *const snake, const apple_t *const apple);
 static void GameOver(void);
 static void logger(const uint8_t mask);
-static const CPU_BOOLEAN TupleComp(const tuple *const tuple1, const tuple *const tuple2);
+static const CPU_BOOLEAN TupleCompareare(const tuple_t *const tuple1, const tuple_t *const tuple2);
 
 /*
 *********************************************************************************************************
@@ -201,13 +212,14 @@ int main(void)
 *                                              STARTUP TASK
 *********************************************************************************************************
 */
-
 static void AppTaskStart(void *p_arg)
 {
     OS_ERR err;
-    snake_head_node snake_head = {SNAKE_START_SPEED, SNAKE_START_DIRECTION, SNAKE_START_COORDINATES, NULL};
-    tuple apple = APPLE_START_COORDINATES;
-    gamedata_t data = {&snake_head, &apple};
+    snake_t snake;
+    tuple_t apple = APPLE_START_COORDINATES;
+    gamedata_t data = {&snake, &apple};
+
+    SnakeInit(&snake);
 
     HAL_Init();
 
@@ -233,7 +245,7 @@ static void AppTaskStart(void *p_arg)
         OSTaskCreate((OS_TCB *)&TouchInputTCB,
                      (CPU_CHAR *)"TouchInput Task",
                      (OS_TASK_PTR)TouchInput,
-                     (void *)&data,
+                     (void *)&data.snake,
                      (OS_PRIO)TOUCH_INPUT_PRIO,
                      (CPU_STK *)&TouchInputStk[0],
                      (CPU_STK_SIZE)TASK_STK_SIZE / 10,
@@ -261,7 +273,7 @@ static void AppTaskStart(void *p_arg)
         OSTaskCreate((OS_TCB *)&DrawSnakeTCB,
                      (CPU_CHAR *)"DrawSnake Task",
                      (OS_TASK_PTR)DrawSnake,
-                     (void *)&data,
+                     (void *)&data.snake,
                      (OS_PRIO)DRAW_SNAKE_PRIO,
                      (CPU_STK *)&DrawSnakeStk[0],
                      (CPU_STK_SIZE)TASK_STK_SIZE / 10,
@@ -275,7 +287,7 @@ static void AppTaskStart(void *p_arg)
         OSTaskCreate((OS_TCB *)&DrawAppleTCB,
                      (CPU_CHAR *)"DrawApple Task",
                      (OS_TASK_PTR)DrawApple,
-                     (void *)&data,
+                     (void *)&data.apple,
                      (OS_PRIO)DRAW_APPLE_PRIO,
                      (CPU_STK *)&DrawAppleStk[0],
                      (CPU_STK_SIZE)TASK_STK_SIZE / 10,
@@ -289,7 +301,7 @@ static void AppTaskStart(void *p_arg)
         OSTaskCreate((OS_TCB *)&AnalysisTCB,
                      (CPU_CHAR *)"Analysis Task",
                      (OS_TASK_PTR)Analysis,
-                     (void *)&data,
+                     (void *)&data.snake,
                      (OS_PRIO)ANALYSIS_PRIO,
                      (CPU_STK *)&AnalysisStk[0],
                      (CPU_STK_SIZE)TASK_STK_SIZE / 10,
@@ -317,7 +329,7 @@ static void TouchInput(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
-    snake_head_node *snake_head = ((gamedata_t *)p_arg)->snake_head;
+    snake_t *snake = ((snake_t *)p_arg);
     while (DEF_TRUE)
     {
         BSP_TS_GetState(&TS_State);
@@ -333,28 +345,28 @@ static void TouchInput(void *p_arg)
 
             if (TS_State.Y < 75)
             {
-                if (TupleComp(&(snake_head->direction), &DIR_UP) || TupleComp(&(snake_head->direction), &DIR_DOWN))     // can turn LEFT only if current direction is UP or DOWN
-                    snake_head->direction = DIR_LEFT;
+                if (TupleCompare(&(snake->direction), &DIR_UP) || TupleCompare(&(snake->direction), &DIR_DOWN)) // can turn LEFT only if current direction is UP or DOWN
+                    snake->direction = DIR_LEFT;
             }
             else if (TS_State.Y < 225)
             {
-                if ((TupleComp(&(snake_head->direction), &DIR_LEFT) || TupleComp(&(snake_head->direction), &DIR_RIGHT)))    // can turn UP/DOWN only if current direction is LEFT or RIGHT
+                if ((TupleCompare(&(snake->direction), &DIR_LEFT) || TupleCompare(&(snake->direction), &DIR_RIGHT))) // can turn UP/DOWN only if current direction is LEFT or RIGHT
                 {
                     if (TS_State.X < 120)
                     {
 
-                        snake_head->direction = DIR_UP;
+                        snake->direction = DIR_UP;
                     }
                     else
                     {
-                        snake_head->direction = DIR_DOWN;
+                        snake->direction = DIR_DOWN;
                     }
                 }
             }
             else if (TS_State.Y >= 225)
             {
-                if ((TupleComp(&(snake_head->direction), &DIR_UP) || TupleComp(&(snake_head->direction), &DIR_DOWN)))       // can turn RIGHT only if current direction is UP or DOWN
-                    snake_head->direction = DIR_RIGHT;
+                if ((TupleCompare(&(snake->direction), &DIR_UP) || TupleCompare(&(snake->direction), &DIR_DOWN))) // can turn RIGHT only if current direction is UP or DOWN
+                    snake->direction = DIR_RIGHT;
             }
 
             OSMutexPost((OS_MUTEX *)&mutex_snake,
@@ -374,9 +386,9 @@ static void GameRun(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
-    snake_head_node *snake_head = ((gamedata_t *)p_arg)->snake_head;
-    // snake_body_node *snake_body;
-    tuple *apple = ((gamedata_t *)p_arg)->apple;
+    snake_t *snake = ((gamedata_t *)p_arg)->snake;
+
+    tuple_t *apple = ((gamedata_t *)p_arg)->apple;
 
     while (DEF_TRUE)
     {
@@ -386,7 +398,7 @@ static void GameRun(void *p_arg)
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
 
-        SnakeCoordinatesUpdate(snake_head);
+        SnakeCoordinatesUpdate(snake);
 
         OSMutexPend((OS_MUTEX *)&mutex_apple,
                     (OS_TICK)0,
@@ -394,9 +406,9 @@ static void GameRun(void *p_arg)
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
 
-        // if (TryEatApple(snake_head, (tuple *)apple))
+        // if (TryEatApple(snake, (apple_t *)apple))
         // {
-        //     AppleCoordinatesUpdate((tuple *)apple);
+        //     AppleCoordinatesUpdate((apple_t *)apple);
         // }
 
         OSMutexPost((OS_MUTEX *)&mutex_apple,
@@ -417,17 +429,17 @@ static void GameRun(void *p_arg)
     }
 }
 
-/*---------------------------------------------------*/
-//! \brief Draw snake to the LCD Screen
-//! \param [IN] p_arg - cast to gamedata_t* before use
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-/*---------------------------------------------------*/
+/**
+ * \brief Draw snake to the LCD Screen
+ * \param [IN] p_arg - cast to gamedata_t* before use
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
 static void DrawSnake(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
-    snake_head_node *snake_head = ((gamedata_t *)p_arg)->snake_head;
-    snake_body_node *snake_body;
+    snake_t *snake = ((gamedata_t *)p_arg)->snake;
+    snake_body_node_t *snake_node = snake->head;
 
     while (DEF_TRUE)
     {
@@ -439,12 +451,10 @@ static void DrawSnake(void *p_arg)
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
 
-        snake_body = snake_head->next_node;
-        BSP_LCD_FillRect(snake_head->coordinates.X + SNAKE_X_OFFSET, snake_head->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
-        while (snake_body != NULL)
+        while ((snake_node->next_node) != NULL)
         {
-            BSP_LCD_DrawRect(snake_body->coordinates.X + SNAKE_X_OFFSET, snake_body->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
-            snake_body = snake_body->next_node;
+            BSP_LCD_DrawRect(snake_node->coordinates.X + SNAKE_X_OFFSET, snake_node->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
+            snake_node = snake_node->next_node;
         }
 
         OSMutexPost((OS_MUTEX *)&mutex_snake,
@@ -461,16 +471,16 @@ static void DrawSnake(void *p_arg)
     }
 }
 
-/*---------------------------------------------------*/
-//! \brief Draw apple to the LCD Screen
-//! \param [IN] p_arg - cast to gamedata_t* before use
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-/*---------------------------------------------------*/
+/**
+ * \brief Draw apple to the LCD Screen
+ * \param [IN] p_arg - cast to gamedata_t* before use
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
 static void DrawApple(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
-    tuple *apple = ((gamedata_t *)p_arg)->apple;
+    apple_t *apple = ((gamedata_t *)p_arg)->apple;
 
     while (DEF_TRUE)
     {
@@ -480,8 +490,8 @@ static void DrawApple(void *p_arg)
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
 
-        BSP_LCD_SetTextColor(LCD_COLOR_RED);
-        BSP_LCD_FillCircle(apple->X, apple->Y, HALF_SCALE);
+        BSP_LCD_SetTextColor(apple->colour);
+        BSP_LCD_FillCircle(apple->coordinates.X, apple->coordinates.Y, HALF_SCALE);
 
         OSTimeDlyHMSM(
             (CPU_INT16U)0,
@@ -492,7 +502,7 @@ static void DrawApple(void *p_arg)
             &err);
 
         BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
-        BSP_LCD_FillCircle(apple->X, apple->Y, HALF_SCALE);
+        BSP_LCD_FillCircle(apple->coordinates.X, apple->coordinates.Y, HALF_SCALE);
 
         OSMutexPost((OS_MUTEX *)&mutex_apple,
                     (OS_OPT)OS_OPT_POST_NONE,
@@ -508,11 +518,11 @@ static void DrawApple(void *p_arg)
     }
 }
 
-/*---------------------------------------------------*/
-//! \brief Check if snake's head hit it's body
-//! \param [IN] p_arg - cast to gamedata_t* before use
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-/*---------------------------------------------------*/
+/**
+ * \brief Check if snake's head hit it's body
+ * \param [IN] p_arg - cast to gamedata_t* before use
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
 static void Analysis(void *p_arg)
 {
     OS_ERR err;
@@ -546,34 +556,57 @@ static void Analysis(void *p_arg)
 *                                      NON-TASK FUNCTIONS
 *********************************************************************************************************
 */
-/*-------------------------------------------------------------------*/
-//! Update the coordinates of the snake, nonreentrant/not thread safe
-//! \param [IN] snake_head_node
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-/*------------------------------------------------------------------*/
-static void SnakeCoordinatesUpdate(snake_head_node *const snake_head)
+/**
+ * \brief a snake, nonreentrant/not thread safe
+ * \param [IN] snake
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
+static void SnakeInit(snake_t *snake)
 {
-    tuple temp_coordinates = snake_head->coordinates;
-    snake_body_node *snake_body = snake_head->next_node;
+    snake->length = SNAKE_START_LENGTH;
+    snake->speed = SNAKE_START_SPEED;
+    snake->direction = SNAKE_START_DIRECTION;
+    snake->head = NewSnakeNode();
+    snake->head->colour = SNAKE_HEAD_COLOUR;
+    snake->head->previous_node = NULL;
+    snake->head->next_node = NULL;
+    snake->tail = snake->head;
+}
 
-    snake_head->coordinates.X += snake_head->speed * SCALE * snake_head->direction.X;
-    if (snake_head->coordinates.X > 240)
-        snake_head->coordinates.X = 5;
-    if (snake_head->coordinates.X < 0)
-        snake_head->coordinates.X = 235;
+/**
+ * \brief an apple, nonreentrant/not thread safe
+ * \param [IN] snake
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
+static void AppleInit(apple_t *apple)
+{
+    apple->coordinates = APPLE_START_COORDINATES;
+}
 
-    snake_head->coordinates.Y += snake_head->speed * SCALE * snake_head->direction.Y;
-    if (snake_head->coordinates.Y > 320)
-        snake_head->coordinates.Y = 5;
-    if (snake_head->coordinates.Y < 0)
-        snake_head->coordinates.Y = 315;
+/**
+ * \brief update the coordinates of the snake, nonreentrant/not thread safe
+ * \param [IN] snake
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
+static void SnakeCoordinatesUpdate(snake_t *const snake)
+{
+
+    snake_body_node_t *snake_node = snake->head;
+    tuple_t temp_coordinates = snake->head->coordinates;
+
+    snake->head->coordinates.X += snake->speed * SCALE * snake->direction.X;
+    if (snake->head->coordinates.X > 240)
+        snake->head->coordinates.X = 5;
+    if (snake->head->coordinates.X < 0)
+        snake->head->coordinates.X = 235;
+
+    snake->head->coordinates.Y += snake->speed * SCALE * snake->direction.Y;
+    if (snake->head->coordinates.Y > 320)
+        snake->head->coordinates.Y = 5;
+    if (snake->head->coordinates.Y < 0)
+        snake->head->coordinates.Y = 315;
 
     // TBD - Snake body coordinates update
-    // addBody(snake_head)
-    // malloc new_body_node;
-    // new_body_node->coordinates = temp_coordinates;
-    // new_body_node->next = snake_head->next;
-    // snake_heas->next = new_body_node;
 
     // if (snake_body)
     // {
@@ -589,16 +622,97 @@ static void SnakeCoordinatesUpdate(snake_head_node *const snake_head)
     // }
 }
 
-/*---------------------------------------------------------------*/
-//! Check if snake eats the apple, nonreentrant/not thread safe
-//! \param [IN] snake_head_node
-//! \param [IN] apple
-//! \return TRUE or FALSE
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-/*---------------------------------------------------------------*/
-static const CPU_BOOLEAN TryEatApple(const snake_head_node *const snake_head, const tuple *const apple)
+/**
+ * \brief very fast approximation of squreroot precision to unsigned integer
+ * \details Newton-Raphson method
+ * \param [IN] number - an unsigned 16bit number
+ * \return result - the sqrt of the number
+ * \author wildplasser@StackOverflow, ported by Siyuan XU, e2101066@edu.vamk.fi, 12.2022
+ * \ref https://stackoverflow.com/questions/34187171/fast-integer-square-root-approximation
+ **/
+static CPU_INT16U FastSQRT(CPU_INT16U number)
 {
-    return OS_TRUE;
+    CPU_INT16U result, temp;
+
+    if (number < 2)
+        return number; /* avoid div/0 */
+
+    result = 1255; /* starting point is relatively unimportant */
+
+    temp = number / result;
+    result = (result + temp) >> 1;
+    temp = number / result;
+    result = (result + temp) >> 1;
+    temp = number / result;
+    result = (result + temp) >> 1;
+    temp = number / result;
+    result = (result + temp) >> 1;
+
+    return result;
+}
+
+/**
+ * \brief the distance between two nodes
+ * \param [IN] point1 - a point with X, Y cooridnates
+ * \param [IN] point2 - a point with X, Y cooridnates
+ * \return the distance between two nodes
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ **/
+static CPU_INT16U NodeDistance(const tuple_t point1, const tuple_t point2)
+{
+    return FastSQRT((point2.Y - point1.Y) * (point2.Y - point1.Y) + (point2.X - point1.X) * (point2.X - point1.X));
+}
+
+/**
+ * \brief Produce a new snake node on the heap
+ * \return *new_snake_node
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ **/
+static snake_body_node_t *NewSnakeNode(void)
+{
+    snake_body_node_t *new_snake_node = (snake_body_node_t *)malloc(sizeof(snake_body_node_t));
+    if (new_snake_node == NULL)
+    {
+        // Error handling
+        return NULL;
+    }
+    else
+    {
+        return new_snake_node;
+    }
+}
+
+/**
+ * \brief add a snake body node to the end
+ * \param [IN] *snake
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ **/
+static void AddSnakeBodyNode(snake_t *const snake)
+{
+    snake_body_node_t *new_body_node = NewSnakeNode();
+    new_body_node->coordinates.X = snake->tail->coordinates.X + (snake->tail->coordinates.X - snake->tail->previous_node->coordinates.X);
+    new_body_node->coordinates.Y = snake->tail->coordinates.Y + (snake->tail->coordinates.Y - snake->tail->previous_node->coordinates.Y);
+    new_body_node->previous_node = snake->tail;
+    new_body_node->next_node = NULL;
+    snake->tail = new_body_node;
+    snake->length++;
+}
+
+/**
+ * Check if snake eats the apple, nonreentrant/not thread safe
+ * \param [IN] snake
+ * \param [IN] apple
+ * \return TRUE or FALSE
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
+static const CPU_BOOLEAN TryEatApple(snake_t *const snake, const apple_t *const apple)
+{
+    if (NodeDistance(snake->head->coordinates, apple->coordinates) == 0)
+    {
+        AddSnakeBodyNode(snake);
+        return OS_TRUE;
+    }
+    return OS_FALSE;
 }
 
 /**
@@ -608,7 +722,7 @@ static const CPU_BOOLEAN TryEatApple(const snake_head_node *const snake_head, co
  * \return Return 1 if the same, 0 if not
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
  */
-static const CPU_BOOLEAN TupleComp(const tuple *const tuple1, const tuple *const tuple2)
+static const CPU_BOOLEAN TupleCompareare(const tuple_t *const tuple1, const tuple_t *const tuple2)
 {
     if (tuple1->X == tuple2->X && tuple1->Y == tuple2->Y)
     {
@@ -620,11 +734,11 @@ static const CPU_BOOLEAN TupleComp(const tuple *const tuple1, const tuple *const
     }
 }
 
-/*----------------------------------------------------------*/
-//! A simple Debug logger for detected touch screen position
-//! \param [IN] mask - mask for desired log info
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-/*----------------------------------------------------------*/
+/**
+ * A simple Debug logger for detected touch screen position
+ * \param [IN] mask - mask for desired log info
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
 static void logger(const uint8_t mask)
 {
     BSP_LCD_SetTextColor(LCD_COLOR_GREEN);
@@ -673,11 +787,11 @@ void HAL_Delay(uint32_t Delay)
               (OS_ERR *)&err);
 }
 
-/*--------------------------------------------------*/
-//! Print game result
-//! \param [IN] result
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-/*--------------------------------------------------*/
+/**
+ * Print game result
+ * \param [IN] result
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
 static void PrintResult(uint8_t result)
 {
     BSP_LCD_SetTextColor(LCD_COLOR_RED);
@@ -699,10 +813,10 @@ static void PrintResult(uint8_t result)
     GameOver();
 }
 
-/*--------------------------------------------------*/
-//! Delete the tasks and end the game
-//! \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
-/*--------------------------------------------------*/
+/**
+ * Delete the tasks and end the game
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
 static void GameOver(void)
 {
     OS_ERR err;
