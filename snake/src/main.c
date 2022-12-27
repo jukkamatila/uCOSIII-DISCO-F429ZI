@@ -94,7 +94,9 @@ typedef struct game_data
     {          \
         -1, 0  \
     }
-#define ZERO (CPU_INT16S)0
+#define COLLISION_NO (CPU_INT08U)0
+#define COLLISION_SNAKE_HEAD (CPU_INT08U)1
+#define COLLISION_SNAKE_BODY (CPU_INT08U)2
 #define SNAKE_START_SPEED (CPU_INT16S)1
 #define SNAKE_START_LENGTH (CPU_INT16U)0
 #define SNAKE_HEAD_COLOUR LCD_COLOR_GREEN
@@ -162,7 +164,7 @@ static void LCD_Init(void);
 static void Snake_Init(snake_t *const snake);
 static void AddSnakeBody(snake_t *const snake);
 static void DestroySnake(snake_t *const snake);
-static void AppleCoordinatesUpdate(apple_t *const apple);
+static void AppleCoordinatesUpdate(gamedata_t *const game_data);
 static void SnakeCoordinatesUpdate(snake_t *const snake);
 static const CPU_BOOLEAN TryEatApple(snake_t *const snake, const apple_t *const apple);
 static void GameOver(void);
@@ -406,10 +408,10 @@ static void GameRun(void *p_arg)
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
 
-        // if (TryEatApple(snake, (apple_t *)apple))
-        // {
-        //     AppleCoordinatesUpdate((apple_t *)apple);
-        // }
+        if (TryEatApple(snake, (apple_t *)apple))
+        {
+            AppleCoordinatesUpdate((gamedata_t *)p_arg);
+        }
 
         OSMutexPost((OS_MUTEX *)&mutex_apple,
                     (OS_OPT)OS_OPT_POST_NONE,
@@ -451,11 +453,12 @@ static void DrawSnake(void *p_arg)
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
 
-        while ((snake_node->next_node) != NULL)
+        while (snake_node->next_node != NULL)
         {
             BSP_LCD_DrawRect(snake_node->coordinates.X + SNAKE_X_OFFSET, snake_node->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
             snake_node = snake_node->next_node;
         }
+        BSP_LCD_DrawRect(snake_node->coordinates.X + SNAKE_X_OFFSET, snake_node->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
 
         OSMutexPost((OS_MUTEX *)&mutex_snake,
                     (OS_OPT)OS_OPT_POST_NONE,
@@ -558,7 +561,7 @@ static void Analysis(void *p_arg)
 */
 /**
  * \brief a snake, nonreentrant/not thread safe
- * \param [IN] snake
+ * \param [IN] *snake
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
  */
 static void SnakeInit(snake_t *snake)
@@ -575,12 +578,71 @@ static void SnakeInit(snake_t *snake)
 
 /**
  * \brief an apple, nonreentrant/not thread safe
- * \param [IN] snake
+ * \param [IN] *apple
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
  */
 static void AppleInit(apple_t *apple)
 {
     apple->coordinates = APPLE_START_COORDINATES;
+}
+
+/**
+ * \brief Check for collision of a point and the snake, nonreentrant/not thread safe
+ * \param [IN] *snake_head
+ * \param [IN] point - a point on the map
+ * \return collision_type
+ * \details
+ * -COLLISION_NO
+ * -COLLISION_SNAKE_HEAD
+ * -COLLISION_SNAKE_BODY
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
+static CPU_INT08U SnakeCollisionCheck(const snake_body_node_t *const snake_head, const tuple_t point)
+{
+    CPU_INT08U collision_type;
+    snake_body_node_t *snake_node;
+
+    // check the head
+    if (TupleCompare(snake_head->coordinates, point))
+    {
+        collision_type = COLLISION_SNAKE_HEAD;
+    }
+
+    // check the body
+    snake_node = snake_head;
+    while (snake_node->next_node != NULL)
+    {
+        snake_node = snake_node->next_node;
+        if (TupleCompare(snake_node->coordinates, point))
+        {
+            collision_type = COLLISION_SNAKE_BODY;
+            break;
+        }
+    }
+
+    if (TupleCompare(snake_node, point)) // now snake_node == tail
+    {
+        collision_type = COLLISION_SNAKE_BODY;
+    }
+    return collision_type;
+}
+
+/**
+ * \brief Update apple's coordinates, nonreentrant/not thread safe
+ * \param [IN] *apple
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
+static void AppleCoordinatesUpdate(gamedata_t *const game_data)
+{
+    tuple_t new_coordinates;
+    new_coordinates.X = rand() % ili9341_GetLcdPixelWidth();
+    new_coordinates.Y = rand() % ili9341_GetLcdPixelHeight();
+    while (SnakeCollisionCheck(game_data->snake->head, new_coordinates))
+    {
+        new_coordinates.X = rand() % ili9341_GetLcdPixelWidth();
+        new_coordinates.Y = rand() % ili9341_GetLcdPixelHeight();
+    }
+    game_data->apple->coordinates = new_coordinates;
 }
 
 /**
@@ -593,7 +655,7 @@ static void SnakeCoordinatesUpdate(snake_t *const snake)
     snake_body_node_t *snake_node = snake->tail;
 
     // Update the coordinates from the tail to head->next
-    while(snake_node != snake->head)
+    while (snake_node != snake->head)
     {
         snake_node->coordinates = snake_node->previous_node->coordinates;
         snake_node = snake_node->previous_node;
@@ -709,6 +771,7 @@ static const CPU_BOOLEAN TryEatApple(snake_t *const snake, const apple_t *const 
     if (NodeDistance(snake->head->coordinates, apple->coordinates) == 0)
     {
         AddSnakeBodyNode(snake);
+        snake->tail->colour = apple->colour;
         return OS_TRUE;
     }
     return OS_FALSE;
