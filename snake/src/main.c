@@ -28,6 +28,7 @@
 #define LOG_TOUCH_SCREEN (uint8_t)0x01
 #define LOG_BOARD_DATA_CORRUPT (uint8_t)0x02
 #define LOG_ERR_ANALYS (uint8_t)0x04
+#define LOG_ERR_MEMORY (uint8_t)0x08
 #define LOG_CPU_STATUS (uint8_t)0x20
 #define LOG_TASK_COUNT (uint8_t)0x40
 #define LOG_CONTEXT_SWITCH (uint8_t)0x80
@@ -74,6 +75,7 @@ typedef struct game_data
 /* Game Parameters */
 #define SCALE (CPU_INT16S)10 // Map the actual pixel to a square of the grid
 #define HALF_SCALE (CPU_INT16S)5
+#define MAX_LENGTH 32 * 24
 #define DIR_LEFT \
     (tuple_t)    \
     {            \
@@ -94,15 +96,19 @@ typedef struct game_data
     {          \
         -1, 0  \
     }
+typedef CPU_INT08U gameresult_t;
 #define COLLISION_NO (CPU_INT08U)0
 #define COLLISION_SNAKE_HEAD (CPU_INT08U)1
 #define COLLISION_SNAKE_BODY (CPU_INT08U)2
+#define RESULT_WON (gameresult_t)0
+#define RESULT_LOST (gameresult_t)1
+#define APPLE_START_COLOUR LCD_COLOR_RED
 #define SNAKE_START_SPEED (CPU_INT16S)1
-#define SNAKE_START_LENGTH (CPU_INT16U)0
+#define SNAKE_START_LENGTH (CPU_INT16U)1
 #define SNAKE_HEAD_COLOUR LCD_COLOR_GREEN
 #define SNAKE_START_DIRECTION DIR_LEFT
 #define SNAKE_X_OFFSET 0 - HALF_SCALE // OFFSET for centering the each squre of the grid
-#define SNAKE_Y_OFFSET HALF_SCALE
+#define SNAKE_Y_OFFSET 0 - HALF_SCALE
 #define SNAKE_START_COORDINATES \
     (tuple_t)                   \
     {                           \
@@ -112,7 +118,7 @@ typedef struct game_data
 #define APPLE_START_COORDINATES \
     (tuple_t)                   \
     {                           \
-        5, 5                    \
+        115, 135                \
     }
 
 /*
@@ -161,15 +167,21 @@ static void SystemClock_Config(void);
 static void LCD_Init(void);
 
 /* Game Functions */
-static void Snake_Init(snake_t *const snake);
-static void AddSnakeBody(snake_t *const snake);
-static void DestroySnake(snake_t *const snake);
+static void SnakeInit(snake_t *const snake);
+static void AppleInit(apple_t *const apple);
+static snake_body_node_t *NewSnakeNode(void);
+static void AddSnakeBodyNode(snake_t *const snake);
+static const CPU_INT08U SnakeCollisionCheck(const snake_body_node_t *const snake_head, const tuple_t *const point);
+static void FreeSnake(snake_body_node_t *snake_head);
 static void AppleCoordinatesUpdate(gamedata_t *const game_data);
+static void AppleColourUpdate(apple_t *const apple);
 static void SnakeCoordinatesUpdate(snake_t *const snake);
 static const CPU_BOOLEAN TryEatApple(snake_t *const snake, const apple_t *const apple);
-static void GameOver(void);
+static void GameOver(void *p_arg);
+static void PrintResult(const gameresult_t result);
 static void logger(const uint8_t mask);
-static const CPU_BOOLEAN TupleCompareare(const tuple_t *const tuple1, const tuple_t *const tuple2);
+static const CPU_BOOLEAN TupleCompare(const tuple_t *const tuple1, const tuple_t *const tuple2);
+static CPU_INT16U NodeDistance(const tuple_t *const point1, const tuple_t *const point2);
 
 /*
 *********************************************************************************************************
@@ -218,9 +230,10 @@ static void AppTaskStart(void *p_arg)
 {
     OS_ERR err;
     snake_t snake;
-    tuple_t apple = APPLE_START_COORDINATES;
+    apple_t apple;
     gamedata_t data = {&snake, &apple};
 
+    AppleInit(&apple);
     SnakeInit(&snake);
 
     HAL_Init();
@@ -247,7 +260,7 @@ static void AppTaskStart(void *p_arg)
         OSTaskCreate((OS_TCB *)&TouchInputTCB,
                      (CPU_CHAR *)"TouchInput Task",
                      (OS_TASK_PTR)TouchInput,
-                     (void *)&data.snake,
+                     (void *)data.snake,
                      (OS_PRIO)TOUCH_INPUT_PRIO,
                      (CPU_STK *)&TouchInputStk[0],
                      (CPU_STK_SIZE)TASK_STK_SIZE / 10,
@@ -275,7 +288,7 @@ static void AppTaskStart(void *p_arg)
         OSTaskCreate((OS_TCB *)&DrawSnakeTCB,
                      (CPU_CHAR *)"DrawSnake Task",
                      (OS_TASK_PTR)DrawSnake,
-                     (void *)&data.snake,
+                     (void *)data.snake,
                      (OS_PRIO)DRAW_SNAKE_PRIO,
                      (CPU_STK *)&DrawSnakeStk[0],
                      (CPU_STK_SIZE)TASK_STK_SIZE / 10,
@@ -289,7 +302,7 @@ static void AppTaskStart(void *p_arg)
         OSTaskCreate((OS_TCB *)&DrawAppleTCB,
                      (CPU_CHAR *)"DrawApple Task",
                      (OS_TASK_PTR)DrawApple,
-                     (void *)&data.apple,
+                     (void *)data.apple,
                      (OS_PRIO)DRAW_APPLE_PRIO,
                      (CPU_STK *)&DrawAppleStk[0],
                      (CPU_STK_SIZE)TASK_STK_SIZE / 10,
@@ -303,7 +316,7 @@ static void AppTaskStart(void *p_arg)
         OSTaskCreate((OS_TCB *)&AnalysisTCB,
                      (CPU_CHAR *)"Analysis Task",
                      (OS_TASK_PTR)Analysis,
-                     (void *)&data.snake,
+                     (void *)data.snake,
                      (OS_PRIO)ANALYSIS_PRIO,
                      (CPU_STK *)&AnalysisStk[0],
                      (CPU_STK_SIZE)TASK_STK_SIZE / 10,
@@ -313,6 +326,11 @@ static void AppTaskStart(void *p_arg)
                      (void *)0,
                      (OS_OPT)(OS_OPT_TASK_STK_CHK | OS_OPT_TASK_STK_CLR),
                      (OS_ERR *)&err);
+    }
+
+    while (DEF_TRUE)
+    {
+        OSTimeDly(1, OS_OPT_TIME_DLY, &err);
     }
 }
 
@@ -390,7 +408,7 @@ static void GameRun(void *p_arg)
     CPU_TS ts;
     snake_t *snake = ((gamedata_t *)p_arg)->snake;
 
-    tuple_t *apple = ((gamedata_t *)p_arg)->apple;
+    apple_t *apple = ((gamedata_t *)p_arg)->apple;
 
     while (DEF_TRUE)
     {
@@ -408,9 +426,10 @@ static void GameRun(void *p_arg)
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
 
-        if (TryEatApple(snake, (apple_t *)apple))
+        if (TryEatApple(snake, apple))
         {
             AppleCoordinatesUpdate((gamedata_t *)p_arg);
+            AppleColourUpdate(apple);
         }
 
         OSMutexPost((OS_MUTEX *)&mutex_apple,
@@ -440,25 +459,24 @@ static void DrawSnake(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
-    snake_t *snake = ((gamedata_t *)p_arg)->snake;
-    snake_body_node_t *snake_node = snake->head;
+    snake_t *snake = (snake_t *)p_arg;
+    snake_body_node_t *snake_node;
 
     while (DEF_TRUE)
     {
         BSP_LCD_Clear(LCD_COLOR_BLACK);
-        BSP_LCD_SetTextColor(LCD_COLOR_BLUE);
         OSMutexPend((OS_MUTEX *)&mutex_snake,
                     (OS_TICK)0,
                     (OS_OPT)OS_OPT_PEND_BLOCKING,
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
-
-        while (snake_node->next_node != NULL)
+        snake_node = snake->head;
+        while (snake_node != NULL)
         {
-            BSP_LCD_DrawRect(snake_node->coordinates.X + SNAKE_X_OFFSET, snake_node->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
+            BSP_LCD_SetTextColor(snake_node->colour);
+            BSP_LCD_FillRect(snake_node->coordinates.X + SNAKE_X_OFFSET, snake_node->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
             snake_node = snake_node->next_node;
         }
-        BSP_LCD_DrawRect(snake_node->coordinates.X + SNAKE_X_OFFSET, snake_node->coordinates.Y + SNAKE_Y_OFFSET, SCALE, SCALE);
 
         OSMutexPost((OS_MUTEX *)&mutex_snake,
                     (OS_OPT)OS_OPT_POST_NONE,
@@ -475,6 +493,16 @@ static void DrawSnake(void *p_arg)
 }
 
 /**
+ * \brief Testing Circle and Rect offset
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
+static void DrawTest(void)
+{
+    BSP_LCD_FillCircle(100, 100, HALF_SCALE);
+    BSP_LCD_FillRect(100 + SNAKE_X_OFFSET , 100 + SNAKE_Y_OFFSET, SCALE, SCALE);
+}
+
+/**
  * \brief Draw apple to the LCD Screen
  * \param [IN] p_arg - cast to gamedata_t* before use
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
@@ -483,7 +511,7 @@ static void DrawApple(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
-    apple_t *apple = ((gamedata_t *)p_arg)->apple;
+    apple_t *apple = (apple_t *)p_arg;
 
     while (DEF_TRUE)
     {
@@ -495,17 +523,7 @@ static void DrawApple(void *p_arg)
 
         BSP_LCD_SetTextColor(apple->colour);
         BSP_LCD_FillCircle(apple->coordinates.X, apple->coordinates.Y, HALF_SCALE);
-
-        OSTimeDlyHMSM(
-            (CPU_INT16U)0,
-            (CPU_INT16U)0,
-            (CPU_INT16U)0,
-            (CPU_INT16U)200,
-            OS_OPT_TIME_DLY,
-            &err);
-
-        BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
-        BSP_LCD_FillCircle(apple->coordinates.X, apple->coordinates.Y, HALF_SCALE);
+        // DrawTest();
 
         OSMutexPost((OS_MUTEX *)&mutex_apple,
                     (OS_OPT)OS_OPT_POST_NONE,
@@ -515,7 +533,7 @@ static void DrawApple(void *p_arg)
             (CPU_INT16U)0,
             (CPU_INT16U)0,
             (CPU_INT16U)0,
-            (CPU_INT16U)200,
+            (CPU_INT16U)20,
             OS_OPT_TIME_DLY,
             &err);
     }
@@ -531,6 +549,7 @@ static void Analysis(void *p_arg)
     OS_ERR err;
     CPU_TS ts;
 
+    snake_t *snake = (snake_t *)p_arg;
     while (DEF_TRUE)
     {
         OSMutexPend((OS_MUTEX *)&mutex_snake,
@@ -540,6 +559,18 @@ static void Analysis(void *p_arg)
                     (OS_ERR *)&err);
 
         // TBD - check if snake head hits the body
+        if (SnakeCollisionCheck(snake->head, &(snake->head->coordinates)) == COLLISION_SNAKE_BODY)
+        {
+            // game over
+            PrintResult(RESULT_LOST);
+            GameOver(p_arg);
+        }
+
+        if (snake->length == MAX_LENGTH)
+        {
+            PrintResult(RESULT_WON);
+            GameOver(p_arg);
+        }
 
         OSMutexPost((OS_MUTEX *)&mutex_snake,
                     (OS_OPT)OS_OPT_POST_NONE,
@@ -564,12 +595,13 @@ static void Analysis(void *p_arg)
  * \param [IN] *snake
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
  */
-static void SnakeInit(snake_t *snake)
+static void SnakeInit(snake_t *const snake)
 {
     snake->length = SNAKE_START_LENGTH;
     snake->speed = SNAKE_START_SPEED;
     snake->direction = SNAKE_START_DIRECTION;
     snake->head = NewSnakeNode();
+    snake->head->coordinates = SNAKE_START_COORDINATES;
     snake->head->colour = SNAKE_HEAD_COLOUR;
     snake->head->previous_node = NULL;
     snake->head->next_node = NULL;
@@ -584,6 +616,7 @@ static void SnakeInit(snake_t *snake)
 static void AppleInit(apple_t *apple)
 {
     apple->coordinates = APPLE_START_COORDINATES;
+    apple->colour = APPLE_START_COLOUR;
 }
 
 /**
@@ -597,33 +630,29 @@ static void AppleInit(apple_t *apple)
  * -COLLISION_SNAKE_BODY
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
  */
-static CPU_INT08U SnakeCollisionCheck(const snake_body_node_t *const snake_head, const tuple_t point)
+static const CPU_INT08U SnakeCollisionCheck(const snake_body_node_t *const snake_head, const tuple_t *const point)
 {
-    CPU_INT08U collision_type;
+    CPU_INT08U collision_type = COLLISION_NO;
     snake_body_node_t *snake_node;
 
     // check the head
-    if (TupleCompare(snake_head->coordinates, point))
+    if (TupleCompare(&(snake_head->coordinates), point))
     {
         collision_type = COLLISION_SNAKE_HEAD;
     }
 
     // check the body
     snake_node = snake_head;
-    while (snake_node->next_node != NULL)
+    while (snake_node != NULL)
     {
         snake_node = snake_node->next_node;
-        if (TupleCompare(snake_node->coordinates, point))
+        if (TupleCompare(&(snake_node->coordinates), point))
         {
             collision_type = COLLISION_SNAKE_BODY;
             break;
         }
     }
 
-    if (TupleCompare(snake_node, point)) // now snake_node == tail
-    {
-        collision_type = COLLISION_SNAKE_BODY;
-    }
     return collision_type;
 }
 
@@ -635,14 +664,28 @@ static CPU_INT08U SnakeCollisionCheck(const snake_body_node_t *const snake_head,
 static void AppleCoordinatesUpdate(gamedata_t *const game_data)
 {
     tuple_t new_coordinates;
-    new_coordinates.X = rand() % ili9341_GetLcdPixelWidth();
-    new_coordinates.Y = rand() % ili9341_GetLcdPixelHeight();
-    while (SnakeCollisionCheck(game_data->snake->head, new_coordinates))
+    new_coordinates.X = 5 + (rand() % 24) * SCALE;
+    new_coordinates.Y = 5 + (rand() % 32) * SCALE;
+    while (SnakeCollisionCheck(game_data->snake->head, &new_coordinates))
     {
-        new_coordinates.X = rand() % ili9341_GetLcdPixelWidth();
-        new_coordinates.Y = rand() % ili9341_GetLcdPixelHeight();
+        new_coordinates.X = 5 + (rand() % 24) * SCALE;
+        new_coordinates.Y = 5 + (rand() % 32) * SCALE;
     }
     game_data->apple->coordinates = new_coordinates;
+}
+
+static void AppleColourUpdate(apple_t *const apple)
+{
+    uint32_t colours[7] = {
+        LCD_COLOR_RED,
+        LCD_COLOR_ORANGE,
+        LCD_COLOR_YELLOW,
+        LCD_COLOR_GREEN,
+        LCD_COLOR_BLUE,
+        LCD_COLOR_MAGENTA,
+        LCD_COLOR_WHITE};
+    int32_t option = rand() % 7;
+    apple->colour = colours[option];
 }
 
 /**
@@ -719,9 +762,10 @@ static CPU_INT16U FastSQRT(CPU_INT16U number)
  * \return the distance between two nodes
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
  **/
-static CPU_INT16U NodeDistance(const tuple_t point1, const tuple_t point2)
+static CPU_INT16U NodeDistance(const tuple_t *const point1, const tuple_t *const point2)
 {
-    return FastSQRT((point2.Y - point1.Y) * (point2.Y - point1.Y) + (point2.X - point1.X) * (point2.X - point1.X));
+    CPU_INT16U distance = FastSQRT((point2->Y - point1->Y) * (point2->Y - point1->Y) + (point2->X - point1->X) * (point2->X - point1->X));
+    return distance;
 }
 
 /**
@@ -735,12 +779,10 @@ static snake_body_node_t *NewSnakeNode(void)
     if (new_snake_node == NULL)
     {
         // Error handling
-        return NULL;
+        logger(LOG_ERR_MEMORY);
     }
-    else
-    {
-        return new_snake_node;
-    }
+
+    return new_snake_node;
 }
 
 /**
@@ -751,12 +793,39 @@ static snake_body_node_t *NewSnakeNode(void)
 static void AddSnakeBodyNode(snake_t *const snake)
 {
     snake_body_node_t *new_body_node = NewSnakeNode();
-    new_body_node->coordinates.X = snake->tail->coordinates.X + (snake->tail->coordinates.X - snake->tail->previous_node->coordinates.X);
-    new_body_node->coordinates.Y = snake->tail->coordinates.Y + (snake->tail->coordinates.Y - snake->tail->previous_node->coordinates.Y);
+    if (snake->length > 1)
+    {
+        new_body_node->coordinates.X = snake->tail->coordinates.X + (snake->tail->coordinates.X - snake->tail->previous_node->coordinates.X);
+        new_body_node->coordinates.Y = snake->tail->coordinates.Y + (snake->tail->coordinates.Y - snake->tail->previous_node->coordinates.Y);
+    }
+    else
+    {
+        new_body_node->coordinates.X = snake->tail->coordinates.X - snake->speed * SCALE * snake->direction.X;
+        new_body_node->coordinates.Y = snake->tail->coordinates.Y - snake->speed * SCALE * snake->direction.Y;
+    }
+
     new_body_node->previous_node = snake->tail;
     new_body_node->next_node = NULL;
+    snake->tail->next_node = new_body_node;
     snake->tail = new_body_node;
     snake->length++;
+}
+
+/**
+ * \brief Free the heap allocated to snake
+ * \param [IN] *snake_head
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ **/
+static void FreeSnake(snake_body_node_t *snake_head)
+{
+    snake_body_node_t *snake_node_to_free;
+
+    while (snake_head != NULL)
+    {
+        snake_node_to_free = snake_head;
+        snake_head = snake_head->next_node;
+        free(snake_node_to_free);
+    }
 }
 
 /**
@@ -768,7 +837,8 @@ static void AddSnakeBodyNode(snake_t *const snake)
  */
 static const CPU_BOOLEAN TryEatApple(snake_t *const snake, const apple_t *const apple)
 {
-    if (NodeDistance(snake->head->coordinates, apple->coordinates) == 0)
+    // if (NodeDistance(&snake->head->coordinates, &apple->coordinates) == 0)
+    if (TupleCompare(&snake->head->coordinates, &apple->coordinates))
     {
         AddSnakeBodyNode(snake);
         snake->tail->colour = apple->colour;
@@ -784,7 +854,7 @@ static const CPU_BOOLEAN TryEatApple(snake_t *const snake, const apple_t *const 
  * \return Return 1 if the same, 0 if not
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
  */
-static const CPU_BOOLEAN TupleCompareare(const tuple_t *const tuple1, const tuple_t *const tuple2)
+static const CPU_BOOLEAN TupleCompare(const tuple_t *const tuple1, const tuple_t *const tuple2)
 {
     if (tuple1->X == tuple2->X && tuple1->Y == tuple2->Y)
     {
@@ -826,6 +896,12 @@ static void logger(const uint8_t mask)
         sprintf((char *)log, "Error! Analysis turn data corruption!");
         BSP_LCD_DisplayStringAt(0, 20, log, LEFT_MODE);
     }
+
+    if (mask & LOG_ERR_MEMORY)
+    {
+        sprintf((char *)log, "Error! Memory allocation failed!");
+        BSP_LCD_DisplayStringAt(0, 20, log, LEFT_MODE);
+    }
     // TO-DO Extra logs
     //  if (mask & LOG_CPU_STATUS)
     //  {
@@ -854,7 +930,7 @@ void HAL_Delay(uint32_t Delay)
  * \param [IN] result
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
  */
-static void PrintResult(uint8_t result)
+static void PrintResult(const gameresult_t result)
 {
     BSP_LCD_SetTextColor(LCD_COLOR_RED);
     BSP_LCD_SetFont(&Font12);
@@ -871,15 +947,13 @@ static void PrintResult(uint8_t result)
         // the code should never come herer
         break;
     }
-
-    GameOver();
 }
 
 /**
  * Delete the tasks and end the game
  * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
  */
-static void GameOver(void)
+static void GameOver(void *p_arg)
 {
     OS_ERR err;
 
@@ -894,6 +968,8 @@ static void GameOver(void)
 
     OSTaskDel((OS_TCB *)&AnalysisTCB,
               (OS_ERR *)&err);
+
+    FreeSnake(((gamedata_t *)p_arg)->snake->head);
 }
 
 /*
