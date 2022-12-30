@@ -46,7 +46,7 @@ typedef struct tuples
 typedef struct apples
 {
     tuple_t coordinates;
-    uint32_t colour; // red apple is poisionours, green is safe
+    uint32_t colour; // snake get a new body with the same colour as the eaten apple
 } apple_t;
 
 typedef struct snake_body_nodes
@@ -169,13 +169,14 @@ static void LCD_Init(void);
 /* Game Functions */
 static void SnakeInit(snake_t *const snake);
 static void AppleInit(apple_t *const apple);
+static void SnakeCoordinatesUpdate(snake_t *const snake);
+static void SnakeSpeedUpdate(snake_t *const snake);
 static snake_body_node_t *NewSnakeNode(void);
 static void AddSnakeBodyNode(snake_t *const snake);
 static const CPU_INT08U SnakeCollisionCheck(const snake_body_node_t *const snake_head, const tuple_t *const point);
 static void FreeSnake(snake_body_node_t *snake_head);
 static void AppleCoordinatesUpdate(gamedata_t *const game_data);
 static void AppleColourUpdate(apple_t *const apple);
-static void SnakeCoordinatesUpdate(snake_t *const snake);
 static const CPU_BOOLEAN TryEatApple(snake_t *const snake, const apple_t *const apple);
 static void GameOver(void *p_arg);
 static void PrintResult(const gameresult_t result);
@@ -406,8 +407,8 @@ static void GameRun(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
+    CPU_INT16U interval = 999;
     snake_t *snake = ((gamedata_t *)p_arg)->snake;
-
     apple_t *apple = ((gamedata_t *)p_arg)->apple;
 
     while (DEF_TRUE)
@@ -417,8 +418,14 @@ static void GameRun(void *p_arg)
                     (OS_OPT)OS_OPT_PEND_BLOCKING,
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
+        
+        if(interval > 250)
+        {
+            interval = 1000 - snake->speed;
+        }
 
         SnakeCoordinatesUpdate(snake);
+        SnakeSpeedUpdate(snake);
 
         OSMutexPend((OS_MUTEX *)&mutex_apple,
                     (OS_TICK)0,
@@ -443,8 +450,8 @@ static void GameRun(void *p_arg)
         OSTimeDlyHMSM(
             (CPU_INT16U)0,
             (CPU_INT16U)0,
-            (CPU_INT16U)1,
             (CPU_INT16U)0,
+            (CPU_INT16U)interval,
             OS_OPT_TIME_DLY,
             &err);
     }
@@ -705,7 +712,7 @@ static void SnakeCoordinatesUpdate(snake_t *const snake)
     }
 
     // Update the head
-    snake->head->coordinates.X += snake->speed * SCALE * snake->direction.X;
+    snake->head->coordinates.X += SCALE * snake->direction.X;
     if (snake->head->coordinates.X > 240)
     {
         snake->head->coordinates.X = 5;
@@ -715,7 +722,7 @@ static void SnakeCoordinatesUpdate(snake_t *const snake)
         snake->head->coordinates.X = 235;
     }
 
-    snake->head->coordinates.Y += snake->speed * SCALE * snake->direction.Y;
+    snake->head->coordinates.Y += SCALE * snake->direction.Y;
     if (snake->head->coordinates.Y > 320)
     {
         snake->head->coordinates.Y = 5;
@@ -724,6 +731,16 @@ static void SnakeCoordinatesUpdate(snake_t *const snake)
     {
         snake->head->coordinates.Y = 315;
     }
+}
+
+/**
+ * \brief update the speed of the snake, nonreentrant/not thread safe
+ * \param [IN] snake
+ * \author siyuan xu, e2101066@edu.vamk.fi, 12.2022
+ */
+static void SnakeSpeedUpdate(snake_t *const snake)
+{
+    snake->speed = snake->length;
 }
 
 /**
@@ -800,8 +817,8 @@ static void AddSnakeBodyNode(snake_t *const snake)
     }
     else
     {
-        new_body_node->coordinates.X = snake->tail->coordinates.X - snake->speed * SCALE * snake->direction.X;
-        new_body_node->coordinates.Y = snake->tail->coordinates.Y - snake->speed * SCALE * snake->direction.Y;
+        new_body_node->coordinates.X = snake->tail->coordinates.X - SCALE * snake->direction.X;
+        new_body_node->coordinates.Y = snake->tail->coordinates.Y - SCALE * snake->direction.Y;
     }
 
     new_body_node->previous_node = snake->tail;
