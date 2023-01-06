@@ -75,7 +75,10 @@ typedef struct game_data
 /* Game Parameters */
 #define SCALE (CPU_INT16S)10 // Map the actual pixel to a square of the grid
 #define HALF_SCALE (CPU_INT16S)5
-#define MAX_LENGTH 32 * 24
+#define LENGTH_MAX 32 * 24
+#define INTEVAL_MILLISEC_MAX 999
+#define INTEVAL_MILLISEC_MIN 100
+#define INTEVAL_MILLISEC_START 500
 #define DIR_LEFT \
     (tuple_t)    \
     {            \
@@ -118,7 +121,7 @@ typedef CPU_INT08U gameresult_t;
 #define APPLE_START_COORDINATES \
     (tuple_t)                   \
     {                           \
-        115, 135                \
+        115, 205                \
     }
 
 /*
@@ -407,7 +410,7 @@ static void GameRun(void *p_arg)
 {
     OS_ERR err;
     CPU_TS ts;
-    CPU_INT16U interval = 999;
+    CPU_INT16U interval = INTEVAL_MILLISEC_START;
     snake_t *snake = ((gamedata_t *)p_arg)->snake;
     apple_t *apple = ((gamedata_t *)p_arg)->apple;
 
@@ -419,9 +422,9 @@ static void GameRun(void *p_arg)
                     (CPU_TS *)&ts,
                     (OS_ERR *)&err);
         
-        if(interval > 250)
+        if(interval > INTEVAL_MILLISEC_MIN)
         {
-            interval = 1000 - snake->speed;
+            interval = INTEVAL_MILLISEC_START - snake->speed;
         }
 
         SnakeCoordinatesUpdate(snake);
@@ -573,7 +576,7 @@ static void Analysis(void *p_arg)
             GameOver(p_arg);
         }
 
-        if (snake->length == MAX_LENGTH)
+        if (snake->length == LENGTH_MAX)
         {
             PrintResult(RESULT_WON);
             GameOver(p_arg);
@@ -740,7 +743,7 @@ static void SnakeCoordinatesUpdate(snake_t *const snake)
  */
 static void SnakeSpeedUpdate(snake_t *const snake)
 {
-    snake->speed = snake->length;
+    snake->speed = snake->length + snake->length;
 }
 
 /**
@@ -758,7 +761,7 @@ static CPU_INT16U FastSQRT(CPU_INT16U number)
     if (number < 2)
         return number; /* avoid div/0 */
 
-    result = 1255; /* starting point is relatively unimportant */
+    result = 100; /* starting point is relatively unimportant */
 
     temp = number / result;
     result = (result + temp) >> 1;
